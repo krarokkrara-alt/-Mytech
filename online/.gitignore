@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tar.gz
+.env*
+!.env.example
+my-tech-accounting/data/
+*.sqlite*
+secret.key
+.sites-local/

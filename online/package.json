@@ -1,0 +1,1 @@
+{"name":"mytech-online","private":true,"type":"module","scripts":{"build":"node scripts/build.mjs","test":"node --test tests/*.test.mjs my-tech-accounting/tests/model.test.mjs","dev":"node scripts/preview.mjs"},"engines":{"node":">=24.11.1"}}

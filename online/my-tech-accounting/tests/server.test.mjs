@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const root=path.resolve(import.meta.dirname,'..');
+test('local server: CSRF, durable writes, duplicate submission, backup restore and no login',async()=>{const dir=mkdtempSync(path.join(os.tmpdir(),'mytech-test-'));const port=14317,origin='http://127.0.0.1:'+port;let child;
+const start=async()=>{child=spawn(process.execPath,[path.join(root,'server.mjs')],{env:{...process.env,MYTECH_DATA:dir,PORT:String(port)},stdio:'pipe',windowsHide:true});for(let i=0;i<80;i++){await new Promise(r=>setTimeout(r,100));try{if((await fetch(origin+'/api/session')).ok)return;}catch{}}throw new Error('server not ready');};
+const stop=async()=>{if(!child||child.exitCode!==null)return;await new Promise(r=>{child.once('exit',r);child.kill();});};
+try{await start();let info=await(await fetch(origin+'/api/session')).json();assert.equal(info.mode,'local-no-login');assert.equal(info.user.role,'owner');const csrf=info.user.csrf;
+const post=(url,b,headers={})=>fetch(origin+url,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-CSRF-Token':csrf,...headers},body:JSON.stringify(b)});
+assert.equal((await post('/api/login',{})).status,404);
+assert.equal((await post('/api/action',{},{Origin:'https://example.com'})).status,400);
+assert.equal((await post('/api/action',{}, {'X-CSRF-Token':'bad'})).status,400);
+const request={requestId:'test-req-1',action:'customer',payload:{name:'เฉพาะทดสอบ ไม่ใช่ลูกค้าจริง'}};
+assert.equal((await post('/api/action',request)).status,200);const duplicate=await(await post('/api/action',request)).json();assert.equal(duplicate.duplicate,true);
+let state=await(await fetch(origin+'/api/state')).json();assert.equal(state.customers.length,1);assert.equal(state.summary.income,0);assert.equal(state.pending.length,0);
+const backup=await(await fetch(origin+'/api/backup')).json();assert.equal(backup.format,'MYTECH_BACKUP_V1');assert.ok(!('secrets' in backup));
+assert.equal((await post('/api/restore',{confirm:'ผิด',backup})).status,400);
+assert.equal((await post('/api/restore',{confirm:'กู้คืนข้อมูล',backup})).status,200);
+assert.equal((await post('/api/trello/refresh',{})).status,400);
+await stop();await start();state=await(await fetch(origin+'/api/state')).json();assert.equal(state.customers.length,1);assert.equal(state.audit.at(-1).action,'restore');
+const html=await(await fetch(origin)).text();assert.ok(html.includes('MY TECH'));const js=await(await fetch(origin+'/app.js')).text();assert.ok(!js.includes("${btn(icon('logout'),'logout'"));
+}finally{await stop();rmSync(dir,{recursive:true,force:true});}});
+

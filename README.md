@@ -1,19 +1,9 @@
-# MY TECH — บัญชีและสต๊อก
+# MY TECH — บัญชี สต๊อก และเงินเดือน
 
-เว็บแอปภาษาไทยสำหรับบันทึกรายรับรายจ่าย เงินเบิก สต๊อก ใบเสนอราคา และ Invoice พร้อมเชื่อม Trello
+รุ่นออนไลน์พัฒนาต่อจากโปรแกรมเดิม อยู่ใน [online/](online/README.md) ใช้ Cloudflare Worker, D1 และ R2 ผ่าน Sites มีสิทธิ์ผู้เข้าชม/ผู้แก้ไข/เจ้าของ และเงินเดือนพนักงาน
 
-## การใช้งาน
+เว็บไซต์: https://mytech-accounting-payroll.modest-thyme-5086.chatgpt.site
 
-ใช้ Node.js 24.11.1 หรือใหม่กว่า แล้วเปิด `my-tech-accounting/server.mjs` เข้าเว็บที่ `http://127.0.0.1:4317`
+สำหรับพัฒนา: เข้าโฟลเดอร์ online แล้วรัน node scripts/build.mjs และ node --test tests/*.test.mjs my-tech-accounting/tests/model.test.mjs
 
-รุ่นนี้ใช้งานบนเครื่องส่วนตัวโดยไม่ต้องล็อกอิน และเปิดเฉพาะ loopback ห้ามนำไปเปิดสาธารณะโดยตรง
-
-## ข้อมูลและรหัสลับ
-
-ซอร์สโปรแกรมแยกจากข้อมูลการเงินจริง ห้าม commit โฟลเดอร์ data, ฐานข้อมูล SQLite, Token, API secret หรือไฟล์ secret.key
-
-ข้อมูลสำรองให้กู้คืนจากเมนูตั้งค่าในโปรแกรม การเก็บข้อมูลจริงใน repository ต้องใช้ repository ส่วนตัวและได้รับอนุญาตจากเจ้าของข้อมูล
-
-## ทดสอบ
-
-`node --test my-tech-accounting/tests/*.test.mjs`
+ซอร์ส local เดิมใน my-tech-accounting/ ยังคงเดิมและเปิดเฉพาะ 127.0.0.1 ห้ามเปิด server.mjs รุ่นไม่มีล็อกอินต่ออินเทอร์เน็ต ข้อมูลจริงและรหัสลับไม่เก็บใน GitHub บัญชีเจ้าของกำหนดผ่าน runtime secret ฝั่งโฮสต์

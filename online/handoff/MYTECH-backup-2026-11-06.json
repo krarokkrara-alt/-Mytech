@@ -1,0 +1,193 @@
+{
+  "format": "MYTECH_BACKUP_V1",
+  "createdAt": "2026-11-05T22:12:13.723Z",
+  "state": {
+    "version": 1,
+    "revision": 1,
+    "company": {
+      "name": "MY TECH",
+      "address": "",
+      "taxId": "",
+      "phone": "",
+      "paymentInfo": ""
+    },
+    "documents": [],
+    "customers": [],
+    "courses": [],
+    "enrollments": [],
+    "attendance": [],
+    "accounts": [],
+    "entries": [],
+    "products": [],
+    "lots": [],
+    "movements": [],
+    "purchases": [],
+    "boms": [],
+    "debts": [],
+    "pending": [
+      {
+        "id": "a972a659-0f5a-4d4c-af32-8245ec860b58",
+        "title": "จำนวนผู้เข้าเรียน",
+        "note": "ผู้มาเรียนคอร์ส 7,500 บาททั้งหมด 6 คน มีผู้เรียนคอร์ส 30,000 บาทมาร่วม 1 คน ต้องจับคู่รายชื่อก่อนสรุปยอด",
+        "amount": null,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "73c20399-d7a7-4937-8c7c-56f8f9aaf076",
+        "title": "มัดจำปราเมทย์ เพ็ชรัตน์",
+        "note": "คอร์ส 30,000 บาท รับมัดจำ 10,000 บาท เหลือ 20,000 บาท ต้องตรวจวันรับและการจับคู่รายชื่อ",
+        "amount": 1000000,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "6ece7b90-7fdf-44b3-865d-8c86cf2e0be8",
+        "title": "ผู้เรียนหมายเลข 4–6",
+        "note": "เดิมแจ้งว่าจ่ายครบ หมายเลข 5 และ 6 จ่ายเงินสด ต้องตรวจยอดรายคนและไม่ให้นับผู้เรียนคอร์ส 30,000 บาทซ้ำ",
+        "amount": null,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "4702e6d3-746a-488f-8af6-1c8b18d62a91",
+        "title": "ปิ๊กเบิกซื้อของ Lazada",
+        "note": "ใช้เงินสดผู้เรียนหมายเลข 5–6 ซื้อของ ต้องตรวจยอดและใบเสร็จ ไม่ยืนยันยอด 15,000 บาทจากการคาดคะเน",
+        "amount": null,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "c998a7e8-456b-468a-bb31-2e2d1b76263c",
+        "title": "ซื้ออุปกรณ์อิเล็กทรอนิกส์เพิ่ม",
+        "note": "25,000 บาท ต้องยืนยันว่าแยกหรือรวมกับเงินซื้อ Lazada และตรวจวันจ่าย/ผู้จ่าย/สินค้า",
+        "amount": 2500000,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "6de2c2bb-360c-4770-8671-f3c1bb339756",
+        "title": "อุปกรณ์ผลิตคอร์ส",
+        "note": "สรุปเดิม 300 บาท วันที่ 11 กันยายน 2569 แต่ราคาย่อยรวม 301 บาท ต้องตรวจใบเสร็จ",
+        "amount": 30000,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "3970c9fc-c4e7-43c5-92fb-b6b0c91e37a6",
+        "title": "วัสดุปรับปรุงและบำรุงรักษา",
+        "note": "3,022.59 บาท ยังไม่ยืนยันว่าเกี่ยวกับคอร์ส",
+        "amount": 302259,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "abdfbd89-8317-4d40-ae5f-cfe294359760",
+        "title": "หนี้ส่วนตัวปิ๊ก",
+        "note": "สุปัญญา (ปิ๊ก) ติดพี่หนุ่มประมาณ 65,000 บาท แยกจากกิจการ",
+        "amount": 6500000,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      },
+      {
+        "id": "582c7876-cc61-4542-b861-24e55bb65f30",
+        "title": "ลูกค้ารอเช็ก",
+        "note": "หมายเลข 1 ยังไม่พบการยืนยันจ่าย หมายเลข 2–3 คนหนึ่งมาแต่ยังไม่จ่าย อีกคนไม่มา ต้องเช็กว่าใคร",
+        "amount": null,
+        "status": "pending",
+        "source": "ประวัติแชตผู้ใช้",
+        "createdAt": "2026-11-05T21:03:33.209Z"
+      }
+    ],
+    "audit": [
+      {
+        "id": "ca99d0f9-f82e-46d1-a004-07c67cd162b3",
+        "createdAt": "2026-11-05T21:03:33.209Z",
+        "by": "ปิ๊ก",
+        "action": "importHistory",
+        "recordId": null,
+        "note": ""
+      }
+    ],
+    "requests": [
+      "initial-history-2026-11-06"
+    ],
+    "links": [],
+    "trello": {
+      "boardId": "6acd92a058f1f04c4fa73530",
+      "boardUrl": "https://trello.com/b/dfWwJHNs/my-tech-update",
+      "boardName": "My Tech update",
+      "lists": [
+        {
+          "id": "6acd92ae274272c7cc095b8b",
+          "name": "รถที่เข้ามา"
+        },
+        {
+          "id": "6acd92b83ad7d5f5d6adf4fa",
+          "name": "Ecu ที่เข้ามา"
+        },
+        {
+          "id": "6ae370617d28e24eb234ba10",
+          "name": "ครอสเรียน Ecu"
+        },
+        {
+          "id": "6ae379fd1d59f0a51c18d776",
+          "name": "Ecu ระหว่างตรวจเช็ค"
+        },
+        {
+          "id": "6ae72ceb478fd0eebd6391d9",
+          "name": "Ecu ลูกค้าไม่ซ่อม"
+        }
+      ],
+      "cards": [
+        {
+          "id": "6acd92d11c801783aa6bedff",
+          "name": "Isuzu U4 อาการเร่งไม่ออก",
+          "url": "https://trello.com/c/zN465SDe/1-isuzu-u4-%E0%B8%AD%E0%B8%B2%E0%B8%81%E0%B8%B2%E0%B8%A3%E0%B9%80%E0%B8%A3%E0%B9%88%E0%B8%87%E0%B9%84%E0%B8%A1%E0%B9%88%E0%B8%AD%E0%B8%AD%E0%B8%81",
+          "listId": "6acd92ae274272c7cc095b8b"
+        },
+        {
+          "id": "6acdf4c5dfd3e4068e9231ae",
+          "name": "isuzu Mux 8ขจ 4648 กทม จมน้ำแก้อาการ",
+          "url": "https://trello.com/c/2vzbscji/2-isuzu-mux-8%E0%B8%82%E0%B8%88-4648-%E0%B8%81%E0%B8%97%E0%B8%A1-%E0%B8%88%E0%B8%A1%E0%B8%99%E0%B9%89%E0%B8%B3%E0%B9%81%E0%B8%81%E0%B9%89%E0%B8%AD%E0%B8%B2%E0%B8%81%E0%B8%B2%E0%B8%A3",
+          "listId": "6acd92ae274272c7cc095b8b"
+        },
+        {
+          "id": "6aeb1a1b952cf9291dc62c06",
+          "name": "HONDa civifc ฆ น 77กรุงเทพมหานคร",
+          "url": "https://trello.com/c/9NhycCoo/6-honda-civifc-%E0%B8%86-%E0%B8%99-77%E0%B8%81%E0%B8%A3%E0%B8%B8%E0%B8%87%E0%B9%80%E0%B8%97%E0%B8%9E%E0%B8%A1%E0%B8%AB%E0%B8%B2%E0%B8%99%E0%B8%84%E0%B8%A3",
+          "listId": "6acd92ae274272c7cc095b8b"
+        },
+        {
+          "id": "6ae37073214a52d482cbce83",
+          "name": "ครอสเรียน 24 25 ตค",
+          "url": "https://trello.com/c/34gNiWu2/3-%E0%B8%84%E0%B8%A3%E0%B8%AD%E0%B8%AA%E0%B9%80%E0%B8%A3%E0%B8%B5%E0%B8%A2%E0%B8%99-24-25-%E0%B8%95%E0%B8%84",
+          "listId": "6ae370617d28e24eb234ba10"
+        },
+        {
+          "id": "6ae72d06c603e379bba56161",
+          "name": "บอร์ดทดลอง 89661-02860 วันที่1-11-2026",
+          "url": "https://trello.com/c/3EEVbiBb/5-%E0%B8%9A%E0%B8%AD%E0%B8%A3%E0%B9%8C%E0%B8%94%E0%B8%97%E0%B8%94%E0%B8%A5%E0%B8%AD%E0%B8%87-89661-02860-%E0%B8%A7%E0%B8%B1%E0%B8%99%E0%B8%97%E0%B8%B5%E0%B9%881-11-2026",
+          "listId": "6ae370617d28e24eb234ba10"
+        },
+        {
+          "id": "6ae378cee1cd060aaeabbc68",
+          "name": "คิวที่ 1 89661-26B20 รถตู้ 22-10-2026",
+          "url": "https://trello.com/c/xj4EzuGH/4-%E0%B8%84%E0%B8%B4%E0%B8%A7%E0%B8%97%E0%B8%B5%E0%B9%88-1-89661-26b20-%E0%B8%A3%E0%B8%96%E0%B8%95%E0%B8%B9%E0%B9%89-22-10-2026",
+          "listId": "6ae72ceb478fd0eebd6391d9"
+        }
+      ],
+      "connected": true,
+      "lastSync": "2026-11-05T22:08:09.059Z"
+    }
+  },
+  "attachments": []
+}
