@@ -28,3 +28,8 @@ test('permissions are prominent for all visitors while only the owner receives m
 test('permissions link opens the requested page without permitting arbitrary page names',()=>{
   const h=ui();assert.equal(h.run("requestedPage('?page=access')"),'access');assert.equal(h.run("requestedPage('?page=payroll')"),null);assert.equal(h.run("requestedPage('')"),null);
 });
+test('Trello forms expose targets and proofs while salary requires an explicit choice; status keeps failed files visible',()=>{
+  const h=ui();h.run('S.trello.autoSync={enabled:true};S.trelloConfigured=true');const form=h.run("trelloFormFields('entry')+integrationFileFields()");assert.ok(form.includes('สร้างการ์ด / หัวข้อใหม่'));assert.ok(form.includes('syncFiles'));assert.ok(form.includes(' multiple '));
+  assert.ok(!h.run("trelloFormFields('payrollSave')").includes('value="auto"'));assert.equal(h.run("fileMime({name:'export.csv',type:'application/vnd.ms-excel'})"),'text/csv');
+  h.run("S.syncJobs=[{kind:'entry',recordId:'one',status:'done',createdAt:2},{kind:'entry',recordId:'one',status:'error',createdAt:1}]");assert.ok(h.run("trelloRecordStatus('entry','one')").includes('ส่งไม่สำเร็จ'));
+});
