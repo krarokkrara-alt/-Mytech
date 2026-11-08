@@ -17,3 +17,16 @@
 .payroll-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
 details summary{cursor:pointer;font-weight:600}
 @media(max-width:640px){.payroll-metrics{grid-template-columns:1fr}.salary-row{grid-template-columns:minmax(0,1fr) 100px 32px}.top-actions .date-label{display:none}.signin-link{font-size:11px}.local-tag{font-size:10px}.salary-calculator{grid-template-columns:1fr}.salary-calculator output{grid-column:auto}}
+.access-top-link,.access-primary-link{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:9px;background:var(--green);color:white;padding:11px 15px;font-size:12px;font-weight:700;text-decoration:none;line-height:1.5;white-space:nowrap}
+.access-top-link:hover,.access-primary-link:hover{background:#245a47;color:white}.access-top-link svg{flex:none}
+.nav button[data-page="access"]{border:1px solid #b8d99a;background:#edf6e2;color:var(--green);font-weight:bold;margin:5px 0 12px}
+.nav button[data-page="access"].active{background:var(--lime);border-color:#a7c77b;color:var(--green)}
+.access-dashboard-card{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:25px 28px;margin-bottom:24px;border:2px solid #9ab86b;border-radius:15px;background:#eef6df;color:var(--green)}
+.access-card-heading{display:flex;align-items:flex-start;gap:14px}.access-card-heading>svg{width:32px;height:32px;margin-top:5px;flex:none}
+.access-dashboard-card h2{font-size:21px;line-height:1.5;margin:4px 0 7px}.access-dashboard-card p{margin:0;font-size:12px;line-height:1.8}.access-role{font-size:11px;font-weight:700}
+.access-card-actions{display:flex;flex-direction:column;gap:10px;align-items:stretch;flex:none}.access-add-button{background:white;color:var(--green);border:1px solid #a4bd86}.access-signin-link{text-align:center;color:var(--green);font-weight:700;font-size:12px}
+.access-gate{max-width:680px;padding:32px;background:white;border:1px solid var(--line);border-radius:15px;line-height:1.9}.access-gate h2{font-size:24px;margin:14px 0}.access-gate-icon svg{width:36px;height:36px;color:var(--green)}
+.access-owner-intro{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:22px;background:#edf6e2;border:1px solid #b7d69d;border-radius:12px;margin-bottom:20px}.access-owner-intro svg{vertical-align:middle;margin-right:8px}.access-owner-intro p{font-size:12px;margin:8px 0 0;line-height:1.8}
+@media(max-width:1100px){.access-dashboard-card{align-items:flex-start;flex-direction:column;gap:18px}.access-card-actions{width:100%;flex-direction:row;flex-wrap:wrap}.access-card-actions>*{flex:1}.top-actions .date-label{display:none}}
+@media(max-width:760px){.topbar{height:auto;min-height:63px;flex-wrap:wrap;gap:10px;padding-top:12px;padding-bottom:12px}.topbar .crumb{width:100%}.top-actions{width:100%;justify-content:space-between;gap:10px}.top-actions .local-tag{display:none}.access-top-link{font-size:12px;padding:10px 12px}.access-dashboard-card{padding:20px 17px}.access-dashboard-card h2{font-size:18px}.access-card-heading{gap:10px}.access-card-actions{flex-direction:column}.access-owner-intro{align-items:stretch;flex-direction:column}.access-gate{padding:22px}.access-gate h2{font-size:21px}}
+@media print{.access-dashboard-card,.access-owner-intro{display:none}}
