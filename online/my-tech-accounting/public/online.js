@@ -1,7 +1,7 @@
 const paidPayroll=p=>p.paymentEntryId&&active().some(e=>e.id===p.paymentEntryId);
 const accessUrl='/?page=access';
 const ownerSignInUrl='/signin-with-chatgpt?return_to='+encodeURIComponent(accessUrl);
-function requestedPage(search){const value=new URLSearchParams(search).get('page');return value==='access'?'access':null;}
+function requestedPage(search){const value=new URLSearchParams(search).get('page');if(!Object.hasOwn(titles,value))return null;if(['settings','trello','payroll','debt','review'].includes(value)&&!owner())return null;return value;}
 function accessTopLink(){return `<a class="access-top-link" href="${accessUrl}">${icon('shield')}<span>จัดการสิทธิ์ผู้ใช้งาน</span></a>`;}
 function accessDashboardCard(){return `<section class="access-dashboard-card"><div class="access-card-heading">${icon('shield')}<div><span class="access-role">${owner()?'บัญชีเจ้าของระบบ':U.id==='visitor'?'สำหรับเจ้าของระบบ':'สถานะบัญชี: '+esc(U.role==='staff'?'ผู้แก้ไข':'ดูอย่างเดียว')}</span><h2>เพิ่มอีเมล / ถอนสิทธิ์ผู้แก้ไข</h2><p>${owner()?'อนุญาตให้ผู้อื่นแก้ไขข้อมูล และถอนสิทธิ์ได้ทุกเมื่อ':'เจ้าของเพิ่มอีเมลผู้แก้ไขและถอนสิทธิ์ได้ กรุณาเข้าสู่ระบบด้วยบัญชีเจ้าของ'}</p></div></div><div class="access-card-actions"><a class="access-primary-link" href="${accessUrl}">จัดการสิทธิ์ผู้ใช้งาน →</a>${owner()?btn('เพิ่มอีเมลผู้แก้ไข','member','access-add-button'):U.id==='visitor'?`<a class="access-signin-link" href="${ownerSignInUrl}" target="_top">เข้าสู่ระบบเจ้าของ</a>`:''}</div></section>`;}
 function accessGate(){return `<section class="access-gate"><div class="access-gate-icon">${icon('shield')}</div><h2>จัดการสิทธิ์ผู้ใช้งาน</h2><p>เจ้าของระบบสามารถเพิ่มอีเมลให้ผู้อื่นแก้ไขข้อมูล และถอนสิทธิ์แก้ไขได้ทันที</p><div class="notice info">${U.id==='visitor'?'คุณยังไม่ได้เข้าสู่ระบบ กรุณาเข้าสู่ระบบด้วยบัญชีเจ้าของก่อน':`บัญชี ${esc(U.email||U.name)} มีสิทธิ์${U.role==='staff'?'ผู้แก้ไข':'ดูอย่างเดียว'} การเพิ่มหรือถอนสิทธิ์ทำได้เฉพาะบัญชีเจ้าของ`}</div><a class="access-primary-link" href="${ownerSignInUrl}" target="_top">${U.id==='visitor'?'เข้าสู่ระบบเจ้าของ':'เข้าสู่ระบบด้วยบัญชีเจ้าของ'}</a><p class="muted">ผู้เข้าชมทั่วไปดูข้อมูลกิจการได้ แต่ไม่สามารถเพิ่มอีเมลหรือเปลี่ยนสิทธิ์</p></section>`;}
@@ -34,9 +34,10 @@ async function onlineDispatch(command){
   if(cmd==='restore'){
     openModal('กู้คืนข้อมูลจากไฟล์สำรอง','<div class="notice full">แทนที่ข้อมูลทั้งหมดและเก็บสำเนาก่อนกู้คืนให้อัตโนมัติ ไฟล์หลักฐานส่งแยกทีละไฟล์ รองรับ JSON รวมไม่เกิน 100 MB และหลักฐานแต่ละไฟล์ไม่เกิน 10 MB</div>'+field('ไฟล์สำรอง JSON','file','file',{full:true,extra:'accept=".json,application/json"'})+field('พิมพ์ “กู้คืนข้อมูล” เพื่อยืนยัน','confirm','text',{full:true}),async p=>{
       const file=$('#modal-form [name=file]').files[0];if(!file||file.size>100*1024*1024)throw new Error('เลือกไฟล์สำรองไม่เกิน 100 MB');
-      const backup=JSON.parse(await file.text()),attachments=backup.attachments||[],metadata=attachments.map(({body,...rest})=>rest);
-      const stage=await api('/api/restore/prepare',{confirm:p.confirm,backup:{...backup,attachments:metadata}});
+      const backup=JSON.parse(await file.text()),attachments=backup.attachments||[],metadata=attachments.map(({body,...rest})=>rest),signatureFiles=backup.signatureFiles||[],signatureMetadata=signatureFiles.map(({body,...rest})=>rest);
+      const stage=await api('/api/restore/prepare',{confirm:p.confirm,backup:{...backup,attachments:metadata,signatureFiles:signatureMetadata}});
       for(let i=0;i<attachments.length;i++){toast(`กำลังกู้คืนหลักฐาน ${i+1}/${attachments.length}`);await api('/api/restore/file',{id:stage.id,index:i,base64:attachments[i].body});}
+      for(let i=0;i<signatureFiles.length;i++){toast(`กำลังกู้คืนลายเซ็น ${i+1}/${signatureFiles.length}`);await api('/api/restore/file',{id:stage.id,index:i,signature:true,base64:signatureFiles[i].body});}
       await api('/api/restore/commit',{id:stage.id});
     },'ยืนยันกู้คืน');return true;
   }

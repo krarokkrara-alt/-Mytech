@@ -26,7 +26,7 @@ test('permissions are prominent for all visitors while only the owner receives m
   h.run("U={id:'owner',name:'Owner',role:'owner'};render()");html=h.node('#app').innerHTML;assert.ok(html.includes('เพิ่มอีเมลผู้แก้ไข'));assert.ok(html.includes('ถอนสิทธิ์แก้ไข'));assert.ok(html.includes('private@example.test'));
 });
 test('permissions link opens the requested page without permitting arbitrary page names',()=>{
-  const h=ui();assert.equal(h.run("requestedPage('?page=access')"),'access');assert.equal(h.run("requestedPage('?page=payroll')"),null);assert.equal(h.run("requestedPage('')"),null);
+  const h=ui();assert.equal(h.run("requestedPage('?page=access')"),'access');assert.equal(h.run("requestedPage('?page=payroll')"),'payroll');assert.equal(h.run("requestedPage('?page=settings')"),'settings');assert.equal(h.run("requestedPage('?page=unexpected')"),null);h.run("U={id:'visitor',role:'viewer',name:'Visitor'}");assert.equal(h.run("requestedPage('?page=payroll')"),null);assert.equal(h.run("requestedPage('')"),null);
 });
 test('Trello forms expose targets and proofs while salary requires an explicit choice; status keeps failed files visible',()=>{
   const h=ui();h.run('S.trello.autoSync={enabled:true};S.trelloConfigured=true');const form=h.run("trelloFormFields('entry')+integrationFileFields()");assert.ok(form.includes('สร้างการ์ด / หัวข้อใหม่'));assert.ok(form.includes('syncFiles'));assert.ok(form.includes(' multiple '));

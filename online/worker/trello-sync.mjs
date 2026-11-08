@@ -3,6 +3,7 @@ import {documentHtml} from '../my-tech-accounting/documents.mjs';
 import {receiptHtml} from './receipts.mjs';
 import {payslipHtml,paymentActive} from './payroll.mjs';
 import {assets} from './generated.mjs';
+import {hydrateSignature} from './signature.mjs';
 
 export const syncCollections={entry:'entries',document:'documents',receipt:'receipts',customer:'customers',enrollment:'enrollments',product:'products',purchase:'purchases',movement:'movements',course:'courses',debt:'debts',payroll:'payroll',employee:'employees',account:'accounts',bom:'boms',attendance:'attendance'};
 const syncTitles={entry:'รายการรับ–จ่าย',document:'เอกสาร',receipt:'ใบเสร็จรับเงิน',customer:'ลูกค้า',enrollment:'ลงทะเบียน',product:'สินค้า',purchase:'ใบสั่งซื้อ',movement:'ความเคลื่อนไหวสต๊อก',course:'คอร์ส',debt:'หนี้',payroll:'เงินเดือน',employee:'พนักงาน',account:'บัญชีเงิน',bom:'สูตรประกอบ',attendance:'เข้าร่วมคอร์ส'};
@@ -42,7 +43,7 @@ export async function syncPrepare(env,s,user,kind,recordId,explicit,origin,event
   const previous=await env.DB.prepare('SELECT target FROM trello_routes WHERE record_key=?').bind(key).first();
   let raw=explicit?.enabled?explicit:previous?JSON.parse(previous.target):scope==='business'&&s.trello.autoSync?.enabled?s.trello.autoSync:null;
   if(!raw)return {statements:[],queued:false};
-  const target=syncValidateTarget(s,raw,user,!explicit?.enabled&&!!previous),snapshot=syncSnapshot(s,kind,record,origin,action);if(parentKey)target.parentKey=parentKey;if(attachmentId){snapshot.attachmentId=attachmentId;snapshot.html=null;snapshot.filename=null;}
+  const target=syncValidateTarget(s,raw,user,!explicit?.enabled&&!!previous),renderRecord=structuredClone(record);if(!attachmentId&&['document','receipt','payroll'].includes(kind))renderRecord.company=await hydrateSignature(env,record.company||{...s.company,signature:null});const snapshot=syncSnapshot(s,kind,renderRecord,origin,action);if(parentKey)target.parentKey=parentKey;if(attachmentId){snapshot.attachmentId=attachmentId;snapshot.html=null;snapshot.filename=null;}
   const id=eventId+':'+kind+':'+recordId+(attachmentId?':'+attachmentId:''),now=Date.now(),guard="EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.syncCommitTag')=?)";
   return {queued:true,id,statements:[
     env.DB.prepare('INSERT INTO trello_routes(record_key,kind,record_id,scope,target) SELECT ?,?,?,?,? WHERE '+guard+' ON CONFLICT(record_key) DO UPDATE SET target=excluded.target,scope=excluded.scope').bind(key,kind,recordId,scope,JSON.stringify(target),eventId),

@@ -110,3 +110,9 @@ test('entry opt-out also suppresses related invoice and automatic receipt update
   const before=h.DB.raw.prepare('SELECT COUNT(*) AS n FROM trello_jobs').get().n;await h.post('/api/trello/auto',newTarget);
   const r=await h.action('entry',{type:'income',accountId:h.accountId,date:'2026-11-08',amount:'100',note:'No Trello for this event',invoiceId:invoice.id},{enabled:false});assert.equal(r.status,200);assert.equal(h.DB.raw.prepare('SELECT COUNT(*) AS n FROM trello_jobs').get().n,before);
 });
+test('selected Trello document exports include the issued signature without modifying stored company metadata',async()=>{
+  const h=trelloHarness(),remote=remoteTrello(),png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=';
+  assert.equal((await h.post('/api/company/signature',{name:'Signer',title:'Director',image:{mime:'image/png',base64:png}})).status,200);
+  const customer=(await h.action('customer',{name:'A'})).body.result;await h.action('document',{kind:'quote',customerId:customer.id,date:'2026-11-08',items:[{description:'A',quantity:'1',price:'100'}]},newTarget);await drain(h,remote);
+  assert.ok(remote.files.some(f=>new TextDecoder().decode(f.bytes).includes('data:image/png;base64,'+png)));assert.ok(!JSON.stringify((await h.call('/api/state')).body.company).includes(png));
+});

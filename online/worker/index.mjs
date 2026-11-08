@@ -4,6 +4,7 @@ import {payrollInitial,payrollMutate,payslipHtml,validatePayroll} from './payrol
 import {assets,seedState} from './generated.mjs';
 import {receiptsInitial,issueReceipt,receiptHtml} from './receipts.mjs';
 import {syncCollections,syncRecord,syncScope,syncAssertAccess,syncActionKind,syncPrepare,syncVisible,syncValidateTarget,syncFlush,syncAcquireLock,syncReleaseLock} from './trello-sync.mjs';
+import {signatureReferences,signatureCompanies,validateSignatureBackup,validateSignatureBytes,hydrateSignature,prepareSignatureRestore} from './signature.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'",'Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 function reply(body,status=200,type='application/json; charset=utf-8',extra={}){return new Response(type.startsWith('application/json')?JSON.stringify(body):body,{status,headers:{...headers,'Content-Type':type,...extra}});}
@@ -48,6 +49,7 @@ export function visibleState(s,u){
       copy.company={...copy.company,paymentInfo:'',taxId:'',address:'',phone:''};
       copy.trello={...copy.trello,cards:[],lists:[]};copy.links=[];
       copy.trello.boards=[];copy.trello.autoSync={enabled:false};copy.receipts=copy.receipts.map(r=>({...r,customer:sanitizeCustomer(r.customer),company:{...r.company,paymentInfo:'',phone:'',address:'',taxId:''}}));
+      for(const company of signatureCompanies(copy))delete company.signature;
     }
   }
   return {...copy,summary:summary(copy)};
@@ -84,7 +86,7 @@ function backupResponse(env,state,rows,filename='MYTECH-backup.json'){
   const encoder=new TextEncoder();
   async function* chunks(){yield JSON.stringify({format:'MYTECH_BACKUP_V1',createdAt:new Date().toISOString(),state}).slice(0,-1)+',"attachments":[';
     for(let i=0;i<rows.length;i++){const a=rows[i],file=a.base64?null:await env.BUCKET.get('attachments/'+a.id);assert(a.base64||file,'ไม่พบไฟล์หลักฐาน');const body=a.base64||toBase64(new Uint8Array(await file.arrayBuffer()));yield (i?',':'')+JSON.stringify({id:a.id,record_id:a.record_id,name:a.name,mime:a.mime,body,by_user:a.by_user});}
-    yield ']}';
+    yield '],"signatureFiles":[';const refs=signatureReferences(state);for(let i=0;i<refs.length;i++){const ref=refs[i],file=await env.BUCKET.get('signatures/'+ref.id);assert(file,'ไม่พบไฟล์ลายเซ็นในข้อมูลสำรอง');yield (i?',':'')+JSON.stringify({...ref,body:toBase64(new Uint8Array(await file.arrayBuffer()))});}yield ']}';
   }
   const iterator=chunks();return reply(new ReadableStream({async pull(controller){try{const r=await iterator.next();if(r.done)controller.close();else controller.enqueue(encoder.encode(r.value));}catch(e){controller.error(e);}}}),200,'application/octet-stream',{'Content-Disposition':'attachment; filename="'+filename+'"'});
 }
@@ -152,7 +154,7 @@ function validateRestore(backup){
   summary(s);
   validatePayroll(payrollInitial(s));
   assert(Array.isArray(backup.attachments||[])&&(backup.attachments||[]).length<=500,'ไฟล์แนบเกินจำนวนที่รองรับ');
-  const receiptEntries=new Set(),receiptNumbers=new Set();assert(Array.isArray(s.receipts||[]),'ข้อมูลใบเสร็จไม่ถูกต้อง');for(const r of s.receipts||[]){const entry=s.entries.find(e=>e.id===r.entryId&&e.type==='income'&&e.amount===r.amount);assert(entry&&r.date===entry.date&&typeof r.number==='string'&&r.number&&typeof r.note==='string'&&r.customer&&typeof r.customer.name==='string'&&!receiptEntries.has(r.entryId)&&!receiptNumbers.has(r.number),'ข้อมูลใบเสร็จไม่ถูกต้อง');receiptEntries.add(r.entryId);receiptNumbers.add(r.number);}return receiptsInitial(payrollInitial(s));
+  const receiptEntries=new Set(),receiptNumbers=new Set();assert(Array.isArray(s.receipts||[]),'ข้อมูลใบเสร็จไม่ถูกต้อง');for(const r of s.receipts||[]){const entry=s.entries.find(e=>e.id===r.entryId&&e.type==='income'&&e.amount===r.amount);assert(entry&&r.date===entry.date&&typeof r.number==='string'&&r.number&&typeof r.note==='string'&&r.customer&&typeof r.customer.name==='string'&&!receiptEntries.has(r.entryId)&&!receiptNumbers.has(r.number),'ข้อมูลใบเสร็จไม่ถูกต้อง');receiptEntries.add(r.entryId);receiptNumbers.add(r.number);}validateSignatureBackup(backup);return receiptsInitial(payrollInitial(s));
 }
 async function handle(req,env){
   const url=new URL(req.url),p=url.pathname;
@@ -166,6 +168,15 @@ async function handle(req,env){
     if(req.headers.get('origin')!==url.origin)fail('คำขอจากแหล่งอื่นถูกปฏิเสธ',403);
     if(!req.headers.get('content-type')?.startsWith('application/json')||req.headers.get('x-csrf-token')!=='same-origin')fail('คำขอไม่ถูกต้อง กรุณาโหลดหน้าใหม่',403);
     requireWriter(u);
+  }
+  if(p==='/api/company/signature'&&req.method==='POST'){
+    requireOwner(u);const b=await body(req),row=await readState(env);assert(typeof b.name==='string'&&b.name.length<=120&&typeof b.title==='string'&&b.title.length<=120,'ชื่อและตำแหน่งต้องไม่เกิน 120 ตัวอักษร');
+    let signature=b.remove?null:{...(row.state.company.signature||{}),name:b.name.trim(),title:b.title.trim()};
+    if(signature&&b.image){assert(typeof b.image.base64==='string','รูปแบบรูปลายเซ็นไม่ถูกต้อง');const bytes=fromBase64(b.image.base64);validateSignatureBytes(bytes,b.image.mime);const id=uid();await env.BUCKET.put('signatures/'+id,bytes);signature={...signature,assetId:id,mime:b.image.mime};}
+    row.state.company.signature=signature;row.state.revision++;row.state.audit.push({id:uid(),by:u.name,action:'signature',createdAt:new Date().toISOString(),note:signature?'ตั้งลายเซ็นผู้ออกเอกสาร':'นำลายเซ็นออกจากเอกสารใหม่'});await commit(env,row,row.state);return reply({ok:true});
+  }
+  if(p.startsWith('/api/signature/')&&req.method==='GET'){
+    requireOwner(u);const id=p.split('/').pop(),{state}=await readState(env),ref=signatureReferences(state).find(r=>r.id===id);assert(ref,'ไม่พบลายเซ็น');const file=await env.BUCKET.get('signatures/'+id);assert(file,'ไม่พบไฟล์ลายเซ็น');return reply(await file.arrayBuffer(),200,ref.mime);
   }
   if(p==='/api/state'&&req.method==='GET'){
     const {state}=await readState(env),out=visibleState(state,u);out.attachmentList=[];
@@ -183,29 +194,30 @@ async function handle(req,env){
     return reply({ok:true});
   }
   if(p==='/api/document'&&req.method==='GET'){
-    const {state}=await readState(env),s=visibleState(state,u),doc=s.documents.find(d=>d.id===url.searchParams.get('id'));assert(doc,'ไม่พบเอกสาร');return reply(documentHtml(s,doc),200,'text/html; charset=utf-8');
+    const {state}=await readState(env),s=visibleState(state,u),doc=s.documents.find(d=>d.id===url.searchParams.get('id'));assert(doc,'ไม่พบเอกสาร');if(u.role!=='viewer')doc.company=await hydrateSignature(env,doc.company||{...s.company,signature:null});return reply(documentHtml(s,doc),200,'text/html; charset=utf-8');
   }
-  if(p==='/api/receipt'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u),receipt=(s.receipts||[]).find(r=>r.id===url.searchParams.get('id'));assert(receipt,'ไม่พบใบเสร็จ');return reply(receiptHtml(s,receipt),200,'text/html; charset=utf-8');}
-  if(p==='/api/payslip'&&req.method==='GET'){requireOwner(u);const {state}=await readState(env),slip=state.payroll.find(x=>x.id===url.searchParams.get('id'));assert(slip,'ไม่พบสลิป');return reply(payslipHtml(state,slip),200,'text/html; charset=utf-8');}
+  if(p==='/api/receipt'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u),receipt=(s.receipts||[]).find(r=>r.id===url.searchParams.get('id'));assert(receipt,'ไม่พบใบเสร็จ');if(u.role!=='viewer')receipt.company=await hydrateSignature(env,receipt.company||{...s.company,signature:null});return reply(receiptHtml(s,receipt),200,'text/html; charset=utf-8');}
+  if(p==='/api/payslip'&&req.method==='GET'){requireOwner(u);const {state}=await readState(env),slip=state.payroll.find(x=>x.id===url.searchParams.get('id'));assert(slip,'ไม่พบสลิป');slip.company=await hydrateSignature(env,slip.company||{...state.company,signature:null});return reply(payslipHtml(state,slip),200,'text/html; charset=utf-8');}
   if(p==='/api/backup'&&req.method==='GET'){
     requireOwner(u);const row=await readState(env),attachments=await attachmentRows(env),current=await env.DB.prepare('SELECT revision FROM app_state WHERE id=1').first();if(current.revision!==row.revision)fail('ข้อมูลเปลี่ยนระหว่างสำรอง กรุณาดาวน์โหลดอีกครั้ง',409);return backupResponse(env,row.state,attachments);
   }
   if(p==='/api/recovery'&&req.method==='GET'){requireOwner(u);const id=url.searchParams.get('id');if(!id)return reply((await env.DB.prepare('SELECT id,created_at FROM recovery_backups ORDER BY created_at DESC LIMIT 20').all()).results);const r=await env.DB.prepare('SELECT json FROM recovery_backups WHERE id=?').bind(id).first();assert(r,'ไม่พบสำเนา');const file=await env.BUCKET.get(r.json);assert(file,'ไม่พบไฟล์สำเนา');const saved=JSON.parse(await file.text());return backupResponse(env,saved.state,saved.attachments,'MYTECH-before-restore.json');}
   if(p==='/api/restore/prepare'&&req.method==='POST'){
-    requireOwner(u);const b=await body(req);assert(b.confirm==='กู้คืนข้อมูล','พิมพ์คำยืนยันให้ถูกต้อง');const next=validateRestore(b.backup),row=await readState(env),id=uid(),files=(b.backup.attachments||[]).map(attachmentMetadata);
+    requireOwner(u);const b=await body(req);assert(b.confirm==='กู้คืนข้อมูล','พิมพ์คำยืนยันให้ถูกต้อง');const signaturePlan=prepareSignatureRestore(validateRestore(b.backup),b.backup.signatureFiles||[]),next=signaturePlan.state,row=await readState(env),id=uid(),files=(b.backup.attachments||[]).map(attachmentMetadata);
     const validRecords=new Set(Object.values(syncCollections).flatMap(col=>(next[col]||[]).map(x=>x.id)));assert(files.every(a=>validRecords.has(a.record_id)),'ไฟล์แนบอ้างอิงรายการที่ไม่มีอยู่');
-    await env.BUCKET.put('restore/'+id+'.json',JSON.stringify({ownerId:u.id,createdAt:Date.now(),revision:row.revision,state:next,files}));return reply({id,count:files.length});
+    await env.BUCKET.put('restore/'+id+'.json',JSON.stringify({ownerId:u.id,createdAt:Date.now(),revision:row.revision,state:next,files,signatureFiles:signaturePlan.files}));return reply({id,count:files.length});
   }
   if(p==='/api/restore/file'&&req.method==='POST'){
-    requireOwner(u);const b=await body(req),stage=await loadStage(env,b.id,u),a=stage.files[b.index];assert(Number.isInteger(b.index)&&a&&typeof b.base64==='string','ไม่พบไฟล์ในชุดกู้คืน');const bytes=fromBase64(b.base64);assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์หลักฐานเกิน 10 MB');await env.BUCKET.put('attachments/'+a.id,bytes);return reply({ok:true});
+    requireOwner(u);const b=await body(req),stage=await loadStage(env,b.id,u),a=(b.signature?stage.signatureFiles:stage.files)?.[b.index];assert(Number.isInteger(b.index)&&a&&typeof b.base64==='string','ไม่พบไฟล์ในชุดกู้คืน');const bytes=fromBase64(b.base64);if(b.signature)validateSignatureBytes(bytes,a.mime);else assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์หลักฐานเกิน 10 MB');await env.BUCKET.put((b.signature?'signatures/':'attachments/')+a.id,bytes);return reply({ok:true});
   }
   if(p==='/api/restore/commit'&&req.method==='POST'){
     requireOwner(u);const b=await body(req),stage=await loadStage(env,b.id,u),row=await readState(env);if(row.revision!==stage.revision)fail('ข้อมูลเปลี่ยนระหว่างกู้คืน กรุณาตรวจรายการล่าสุดแล้วเริ่มกู้คืนใหม่',409);
+    for(const a of stage.signatureFiles||[])assert(await env.BUCKET.get('signatures/'+a.id),'ยังส่งรูปลายเซ็นไม่ครบ');
     for(const a of stage.files)assert(await env.BUCKET.get('attachments/'+a.id),'ยังส่งไฟล์หลักฐานไม่ครบ');
     await applyRestore(env,u,row,stage.state,stage.files);return reply({ok:true});
   }
   if(p==='/api/restore'&&req.method==='POST'){
-    requireOwner(u);const b=await body(req);assert(b.confirm==='กู้คืนข้อมูล','พิมพ์คำยืนยันให้ถูกต้อง');const next=validateRestore(b.backup),row=await readState(env),files=[];
+    requireOwner(u);const b=await body(req);assert(b.confirm==='กู้คืนข้อมูล','พิมพ์คำยืนยันให้ถูกต้อง');const signaturePlan=prepareSignatureRestore(validateRestore(b.backup),b.backup.signatureFiles||[]),next=signaturePlan.state,row=await readState(env),files=[];for(let i=0;i<signaturePlan.files.length;i++){const a=signaturePlan.files[i],bytes=fromBase64(b.backup.signatureFiles[i].body);validateSignatureBytes(bytes,a.mime);await env.BUCKET.put('signatures/'+a.id,bytes);}
     for(const a of b.backup.attachments||[]){const meta=attachmentMetadata(a),bytes=fromBase64(a.body);assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์หลักฐานเกิน 10 MB');await env.BUCKET.put('attachments/'+meta.id,bytes);files.push(meta);}
     await applyRestore(env,u,row,next,files);return reply({ok:true});
   }
