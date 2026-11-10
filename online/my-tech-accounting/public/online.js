@@ -1,5 +1,7 @@
 const paidPayroll=p=>p.paymentEntryId&&active().some(e=>e.id===p.paymentEntryId);
 const accessUrl='/?page=access';
+const payrollUrl='/?page=payroll';
+function payrollDashboardCard(){return owner()?`<section class="payroll-dashboard-card"><div>${icon('wallet')}<div><h2>คิดเงินเดือนพนักงาน</h2><p>จัดการพนักงาน เงินเดือน รายได้เพิ่ม และรายการหัก</p></div></div><a href="${payrollUrl}">เปิดหน้าเงินเดือน →</a></section>`:'';}
 const ownerSignInUrl='/signin-with-chatgpt?return_to='+encodeURIComponent(accessUrl);
 function requestedPage(search){const value=new URLSearchParams(search).get('page');if(!Object.hasOwn(titles,value))return null;if(['settings','trello','payroll','debt','review'].includes(value)&&!owner())return null;return value;}
 function accessTopLink(){return `<a class="access-top-link" href="${accessUrl}">${icon('shield')}<span>จัดการสิทธิ์ผู้ใช้งาน</span></a>`;}
