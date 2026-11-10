@@ -1,1 +1,27 @@
-{"version":"7","dialect":"sqlite","entries":[{"idx":0,"version":"6","when":1794074400000,"tag":"0000_online","breakpoints":true},{"idx":1,"version":"6","when":1794135600000,"tag":"0001_trello_sync","breakpoints":true}]}
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794074400000,
+      "tag": "0000_online",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794135600000,
+      "tag": "0001_trello_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794322571977,
+      "tag": "0002_ai_requests",
+      "breakpoints": true
+    }
+  ]
+}

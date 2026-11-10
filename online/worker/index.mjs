@@ -5,6 +5,7 @@ import {assets,seedState} from './generated.mjs';
 import {receiptsInitial,issueReceipt,receiptHtml} from './receipts.mjs';
 import {syncCollections,syncRecord,syncScope,syncAssertAccess,syncActionKind,syncPrepare,syncVisible,syncValidateTarget,syncFlush,syncAcquireLock,syncReleaseLock} from './trello-sync.mjs';
 import {signatureReferences,signatureCompanies,validateSignatureBackup,validateSignatureBytes,hydrateSignature,prepareSignatureRestore} from './signature.mjs';
+import {handleMcp} from './mcp.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'",'Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 function reply(body,status=200,type='application/json; charset=utf-8',extra={}){return new Response(type.startsWith('application/json')?JSON.stringify(body):body,{status,headers:{...headers,'Content-Type':type,...extra}});}
@@ -158,6 +159,7 @@ function validateRestore(backup){
 }
 async function handle(req,env){
   const url=new URL(req.url),p=url.pathname;
+  if(p==='/mcp')return handleMcp(req,{parse:()=>body(req),respond:reply,session:()=>userFor(req,env),load:async u=>visibleState((await readState(env)).state,u),save:async(u,b)=>{requireWriter(u);return recordAction(env,{...u,name:u.name+' (AI)'},b,url.origin);},lookup:key=>env.DB.prepare('SELECT fingerprint FROM ai_requests WHERE id=?').bind(key).first(),remember:(key,fingerprint)=>env.DB.prepare('INSERT OR IGNORE INTO ai_requests(id,fingerprint) VALUES(?,?)').bind(key,fingerprint).run()});
   if(req.method==='GET'&&assets[p]){const a=assets[p];return reply(a.body,200,a.type);}
   if(p==='/api/health')return reply({ok:true,storage:'D1',version:'2.0'});
   if(!p.startsWith('/api/'))return reply({error:'ไม่พบหน้า'},404);
@@ -247,4 +249,4 @@ async function handle(req,env){
   }
   return reply({error:'ไม่พบคำสั่ง'},404);
 }
-export default {async fetch(req,env,ctx){try{const response=await handle(req,env);const path=new URL(req.url).pathname;if(ctx?.waitUntil&&response.status<400&&['/api/action','/api/attachment','/api/trello/send','/api/trello/retry','/api/trello/jobs','/api/trello/config'].includes(path))ctx.waitUntil((async()=>{const until=Date.now()+20000;for(let i=0;i<5&&Date.now()<until;i++){const count=await syncFlush(env,(method,endpoint,params)=>trello(env,method,endpoint,params));if(!count)break;}})().catch(()=>{}));return response;}catch(e){const known=e.status||!/^D1_|SQLITE|Cannot |Unexpected|.*is not/.test(e.message||'');return reply({error:known?(e.message?.includes('UNIQUE')?'รายการนี้มีอยู่แล้ว':e.message||'ทำรายการไม่สำเร็จ'):'ระบบขัดข้อง กรุณาลองอีกครั้ง'},e.status|| (known?400:500));}}};
+export default {async fetch(req,env,ctx){try{const response=await handle(req,env);const path=new URL(req.url).pathname;if(ctx?.waitUntil&&response.status<400&&((path==='/mcp'&&response.headers.get('X-Mytech-Flush')==='1')||['/api/action','/api/attachment','/api/trello/send','/api/trello/retry','/api/trello/jobs','/api/trello/config'].includes(path)))ctx.waitUntil((async()=>{const until=Date.now()+20000;for(let i=0;i<5&&Date.now()<until;i++){const count=await syncFlush(env,(method,endpoint,params)=>trello(env,method,endpoint,params));if(!count)break;}})().catch(()=>{}));return response;}catch(e){const known=e.status||!/^D1_|SQLITE|Cannot |Unexpected|.*is not/.test(e.message||'');return reply({error:known?(e.message?.includes('UNIQUE')?'รายการนี้มีอยู่แล้ว':e.message||'ทำรายการไม่สำเร็จ'):'ระบบขัดข้อง กรุณาลองอีกครั้ง'},e.status|| (known?400:500));}}};
