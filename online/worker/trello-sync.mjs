@@ -10,6 +10,19 @@ const syncTitles={entry:'รายการรับ–จ่าย',document:'�
 const syncMoney=n=>new Intl.NumberFormat('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2}).format((n||0)/100);
 const syncEntryTypes={income:'รายรับ',expense:'รายจ่าย',advance:'เงินเบิก',settlement:'เคลียร์เงินเบิก',advance_return:'คืนเงินเบิก',opening:'ยอดยกมา',reversal:'กลับรายการ',owner_in:'เจ้าของเติมเงิน',owner_out:'เจ้าของถอนเงิน',debt_repay:'คืนเงินต้น',interest:'ดอกเบี้ย'};
 export function syncRecord(s,kind,id){const col=syncCollections[kind];return col?(s[col]||[]).find(r=>r.id===id):null;}
+export function syncProgramOnly(s,kind,record,depth=0){
+  if(['payroll','employee'].includes(kind))return true;
+  if(!record||depth>20)return true;
+  if(kind==='entry'){if(record.payrollId||(s.payroll||[]).some(p=>p.paymentEntryId===record.id))return true;return record.reverses?syncProgramOnly(s,'entry',s.entries.find(e=>e.id===record.reverses),depth+1):false;}
+  if(kind==='receipt')return syncProgramOnly(s,'entry',s.entries.find(e=>e.id===record.entryId),depth+1);
+  return false;
+}
+export async function syncJobProgramOnly(env,s,job){
+  const record=syncRecord(s,job.kind,job.record_id);if(!record||syncProgramOnly(s,job.kind,record))return true;
+  const attachmentId=job.attachmentId||JSON.parse(job.snapshot||'{}').attachmentId;if(!attachmentId)return false;
+  const file=await env.DB.prepare('SELECT a.record_id,p.attachment_id AS privateId FROM attachments a LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id WHERE a.id=?').bind(attachmentId).first();
+  return !file||file.record_id!==job.record_id||!!file.privateId;
+}
 export function syncScope(s,kind,record,depth=0){
   if(['employee','payroll'].includes(kind))return 'private';
   if(kind==='entry'){if(record.reverses){const original=s.entries.find(e=>e.id===record.reverses);return !original||depth>20?'private':syncScope(s,'entry',original,depth+1);}return record.payrollId||s.accounts.find(a=>a.id===record.accountId)?.scope==='personal'?'private':'business';}
@@ -39,6 +52,7 @@ export function syncValidateTarget(s,target,user,trusted=false){
 }
 export async function syncPrepare(env,s,user,kind,recordId,explicit,origin,eventId,action,attachmentId=null,parentKey=null){
   const record=syncAssertAccess(s,kind,recordId,user),scope=syncScope(s,kind,record),key=kind+':'+recordId;
+  if(syncProgramOnly(s,kind,record)||attachmentId&&await env.DB.prepare('SELECT attachment_id FROM payroll_private_attachments WHERE attachment_id=?').bind(attachmentId).first())return {statements:[],queued:false,programOnly:true};
   if(explicit?.enabled===false)return {statements:[],queued:false};
   const previous=await env.DB.prepare('SELECT target FROM trello_routes WHERE record_key=?').bind(key).first();
   let raw=explicit?.enabled?explicit:previous?JSON.parse(previous.target):scope==='business'&&s.trello.autoSync?.enabled?s.trello.autoSync:null;
@@ -58,6 +72,8 @@ export async function syncVisible(env,user){
 async function syncSaveProgress(env,job,progress,phase=null){await env.DB.prepare('UPDATE trello_jobs SET progress=?,phase=?,updated_at=? WHERE id=?').bind(JSON.stringify(progress),phase,Date.now(),job.id).run();job.phase=phase;job.progress=JSON.stringify(progress);}
 async function syncComments(api,cardId,marker){let before;for(let page=0;page<10;page++){const rows=await api('GET','cards/'+cardId+'/actions',{filter:'commentCard',limit:1000,...(before?{before}:{})});if(rows.some(a=>a.data?.text?.includes(marker)))return true;if(rows.length<1000)return false;before=rows.at(-1).id;}throw new Error('ความเห็นบนการ์ดมีจำนวนมาก กรุณาตรวจสถานะด้วยตนเองก่อนส่งซ้ำ');}
 async function syncPerform(env,job,api){
+  const latest=await env.DB.prepare('SELECT json FROM app_state WHERE id=1').first();
+  if(!latest||await syncJobProgramOnly(env,JSON.parse(latest.json),job)){await env.DB.prepare("UPDATE trello_jobs SET status='cancelled',phase=NULL,last_error='ข้อมูลเงินเดือนและหลักฐานเก็บเฉพาะในโปรแกรม',updated_at=? WHERE id=?").bind(Date.now(),job.id).run();return;}
   const target=JSON.parse(job.target),snapshot=JSON.parse(job.snapshot),progress=JSON.parse(job.progress||'{}'),ambiguous=job.phase,force=progress.allowRetry===true;
   delete progress.allowRetry;const marker='MYTECH-REF:'+job.record_key,eventMarker='MYTECH-EVENT:'+job.id;
   let cardId=progress.cardId||target.cardId;
@@ -88,7 +104,7 @@ export async function syncAcquireLock(env){const now=Date.now(),lock=uid();await
 export async function syncReleaseLock(env,lock){await env.DB.prepare('UPDATE trello_sync_lock SET expires=0 WHERE id=1 AND token=?').bind(lock).run();}
 export async function syncFlush(env,api){
   const now=Date.now(),lock=await syncAcquireLock(env);if(!lock)return;
-  try{const job=await env.DB.prepare("SELECT * FROM trello_jobs WHERE (status IN ('pending','error') AND next_at<=?) OR (status='working' AND updated_at<?) ORDER BY created_at,id LIMIT 1").bind(now,now-120000).first();if(!job)return;
+  try{const stateRow=await env.DB.prepare('SELECT json FROM app_state WHERE id=1').first();if(stateRow){const state=JSON.parse(stateRow.json),queued=(await env.DB.prepare("SELECT id,kind,record_id,json_extract(snapshot,'$.attachmentId') AS attachmentId FROM trello_jobs WHERE status NOT IN ('done','cancelled')").all()).results;for(const old of queued)if(await syncJobProgramOnly(env,state,old))await env.DB.prepare("UPDATE trello_jobs SET status='cancelled',phase=NULL,last_error='ข้อมูลเงินเดือนและหลักฐานเก็บเฉพาะในโปรแกรม',updated_at=? WHERE id=? AND status NOT IN ('done','cancelled')").bind(now,old.id).run();}const job=await env.DB.prepare("SELECT * FROM trello_jobs WHERE (status IN ('pending','error') AND next_at<=?) OR (status='working' AND updated_at<?) ORDER BY created_at,id LIMIT 1").bind(now,now-120000).first();if(!job)return;
     await env.DB.prepare("UPDATE trello_jobs SET status='working',attempts=attempts+1,updated_at=? WHERE id=?").bind(now,job.id).run();
     try{await syncPerform(env,job,api);}catch(e){const uncertain=e.uncertain||job.phase&&!e.definite;await env.DB.prepare('UPDATE trello_jobs SET status=?,last_error=?,next_at=?,updated_at=?,phase=? WHERE id=?').bind(uncertain?'uncertain':'error',String(e.message||'ส่ง Trello ไม่สำเร็จ').slice(0,300),Date.now()+60000,Date.now(),e.definite?null:job.phase,job.id).run();}
     return true;

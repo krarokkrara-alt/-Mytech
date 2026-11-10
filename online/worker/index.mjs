@@ -3,7 +3,7 @@ import {documentHtml} from '../my-tech-accounting/documents.mjs';
 import {payrollInitial,payrollMutate,payslipHtml,validatePayroll} from './payroll.mjs';
 import {assets,seedState} from './generated.mjs';
 import {receiptsInitial,issueReceipt,receiptHtml} from './receipts.mjs';
-import {syncCollections,syncRecord,syncScope,syncAssertAccess,syncActionKind,syncPrepare,syncVisible,syncValidateTarget,syncFlush,syncAcquireLock,syncReleaseLock} from './trello-sync.mjs';
+import {syncCollections,syncRecord,syncScope,syncAssertAccess,syncActionKind,syncPrepare,syncProgramOnly,syncJobProgramOnly,syncVisible,syncValidateTarget,syncFlush,syncAcquireLock,syncReleaseLock} from './trello-sync.mjs';
 import {signatureReferences,signatureCompanies,validateSignatureBackup,validateSignatureBytes,hydrateSignature,prepareSignatureRestore} from './signature.mjs';
 import {handleMcp} from './mcp.mjs';
 
@@ -82,23 +82,24 @@ async function recordAction(env,u,b,origin){
 }
 const toBase64=bytes=>{let out='';for(let i=0;i<bytes.length;i+=8192)out+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(out);};
 const fromBase64=str=>Uint8Array.from(atob(str),c=>c.charCodeAt(0));
-async function attachmentRows(env){return (await env.DB.prepare('SELECT * FROM attachments').all()).results;}
+async function attachmentRows(env){return (await env.DB.prepare('SELECT a.*,p.attachment_id AS payrollOnly FROM attachments a LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id').all()).results.map(a=>({...a,payrollOnly:!!a.payrollOnly}));}
 function backupResponse(env,state,rows,filename='MYTECH-backup.json'){
   const encoder=new TextEncoder();
   async function* chunks(){yield JSON.stringify({format:'MYTECH_BACKUP_V1',createdAt:new Date().toISOString(),state}).slice(0,-1)+',"attachments":[';
-    for(let i=0;i<rows.length;i++){const a=rows[i],file=a.base64?null:await env.BUCKET.get('attachments/'+a.id);assert(a.base64||file,'ไม่พบไฟล์หลักฐาน');const body=a.base64||toBase64(new Uint8Array(await file.arrayBuffer()));yield (i?',':'')+JSON.stringify({id:a.id,record_id:a.record_id,name:a.name,mime:a.mime,body,by_user:a.by_user});}
+    for(let i=0;i<rows.length;i++){const a=rows[i],file=a.base64?null:await env.BUCKET.get('attachments/'+a.id);assert(a.base64||file,'ไม่พบไฟล์หลักฐาน');const body=a.base64||toBase64(new Uint8Array(await file.arrayBuffer()));yield (i?',':'')+JSON.stringify({id:a.id,record_id:a.record_id,name:a.name,mime:a.mime,body,by_user:a.by_user,payrollOnly:!!a.payrollOnly});}
     yield '],"signatureFiles":[';const refs=signatureReferences(state);for(let i=0;i<refs.length;i++){const ref=refs[i],file=await env.BUCKET.get('signatures/'+ref.id);assert(file,'ไม่พบไฟล์ลายเซ็นในข้อมูลสำรอง');yield (i?',':'')+JSON.stringify({...ref,body:toBase64(new Uint8Array(await file.arrayBuffer()))});}yield ']}';
   }
   const iterator=chunks();return reply(new ReadableStream({async pull(controller){try{const r=await iterator.next();if(r.done)controller.close();else controller.enqueue(encoder.encode(r.value));}catch(e){controller.error(e);}}}),200,'application/octet-stream',{'Content-Disposition':'attachment; filename="'+filename+'"'});
 }
 async function saveRecovery(env,row){const id=uid(),key='recovery/'+id+'.json',createdAt=new Date().toISOString(),attachments=await attachmentRows(env);const current=await env.DB.prepare('SELECT revision FROM app_state WHERE id=1').first();if(current.revision!==row.revision)fail('ข้อมูลเปลี่ยนระหว่างสำรองก่อนกู้คืน กรุณาเริ่มใหม่',409);await env.BUCKET.put(key,JSON.stringify({state:row.state,attachments}));await env.DB.prepare('INSERT INTO recovery_backups VALUES(?,?,?)').bind(id,createdAt,key).run();}
-function attachmentMetadata(a){assert(a&&typeof a.record_id==='string'&&typeof a.name==='string'&&a.name.length<=180&&supportedFiles.includes(a.mime),'ไฟล์แนบไม่ถูกต้อง');return {id:uid(),record_id:a.record_id,name:a.name,mime:a.mime,by_user:String(a.by_user||'owner').slice(0,200),base64:''};}
+function attachmentMetadata(a){assert(a&&typeof a.record_id==='string'&&typeof a.name==='string'&&a.name.length<=180&&supportedFiles.includes(a.mime),'ไฟล์แนบไม่ถูกต้อง');return {id:uid(),record_id:a.record_id,name:a.name,mime:a.mime,by_user:String(a.by_user||'owner').slice(0,200),base64:'',payrollOnly:a.payrollOnly===true};}
 async function applyRestore(env,u,row,next,files){
   const lock=await syncAcquireLock(env);if(!lock)fail('กำลังส่ง Trello กรุณารอให้เสร็จก่อนกู้คืน',409);try{
   const tag=uid();next.restoreId=tag;next.audit.push({id:uid(),by:u.name,action:'restore',createdAt:new Date().toISOString(),note:'กู้คืนข้อมูล'});
   await saveRecovery(env,row);
-  const guard="EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.restoreId')=?)",extra=[env.DB.prepare('DELETE FROM attachments WHERE '+guard).bind(tag)];
+  const guard="EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.restoreId')=?)",extra=[env.DB.prepare('DELETE FROM attachments WHERE '+guard).bind(tag),env.DB.prepare('DELETE FROM payroll_private_attachments WHERE '+guard).bind(tag)];
   if(files.length)extra.push(env.DB.prepare("INSERT INTO attachments SELECT json_extract(value,'$.id'),json_extract(value,'$.record_id'),json_extract(value,'$.name'),json_extract(value,'$.mime'),'',json_extract(value,'$.by_user') FROM json_each(?) WHERE "+guard).bind(JSON.stringify(files),tag));
+  if(files.some(a=>a.payrollOnly))extra.push(env.DB.prepare("INSERT INTO payroll_private_attachments SELECT json_extract(value,'$.id') FROM json_each(?) WHERE json_extract(value,'$.payrollOnly')=1 AND "+guard).bind(JSON.stringify(files),tag));
   extra.push(env.DB.prepare("UPDATE trello_jobs SET status='cancelled',last_error='ยกเลิกจากการกู้คืนข้อมูล' WHERE status!='done' AND "+guard).bind(tag),env.DB.prepare('DELETE FROM trello_routes WHERE '+guard).bind(tag));
   extra.push(env.DB.prepare('DELETE FROM attachment_requests WHERE '+guard).bind(tag));
   extra.push(env.DB.prepare('DELETE FROM action_results WHERE '+guard).bind(tag));
@@ -131,15 +132,15 @@ async function integrationApi(req,env,u,url){
   }
   if(p==='/api/trello/auto'){requireOwner(u);const enabled=b.enabled===true;if(enabled)assert(!b.boardId||b.boardId===s.trello.boardId,'ค่าอัตโนมัติใช้บอร์ดหลักที่เจ้าของกำหนด');s.trello.autoSync=enabled?{...syncValidateTarget(s,b,u),enabled:true}:{enabled:false};await commit(env,row,s);return reply({ok:true});}
   if(p==='/api/trello/retry'){
-    const job=await env.DB.prepare('SELECT * FROM trello_jobs WHERE id=?').bind(b.id).first();assert(job,'ไม่พบงานส่ง');if(job.scope==='private')requireOwner(u);assert(!['working','done','cancelled'].includes(job.status),'งานนี้กำลังส่ง ส่งเสร็จ หรือถูกยกเลิกแล้ว');syncAssertAccess(s,job.kind,job.record_id,u);
+    const job=await env.DB.prepare('SELECT * FROM trello_jobs WHERE id=?').bind(b.id).first();assert(job,'ไม่พบงานส่ง');if(await syncJobProgramOnly(env,s,job))fail('ข้อมูลเงินเดือนและหลักฐานเก็บเฉพาะในโปรแกรม',403);if(job.scope==='private')requireOwner(u);assert(!['working','done','cancelled'].includes(job.status),'งานนี้กำลังส่ง ส่งเสร็จ หรือถูกยกเลิกแล้ว');syncAssertAccess(s,job.kind,job.record_id,u);
     if(u.role!=='owner')assert(JSON.parse(job.target).boardId===s.trello.boardId,'ส่งได้เฉพาะบอร์ดหลัก');
     const progress=JSON.parse(job.progress||'{}');if(b.confirm==='ตรวจ Trello แล้ว ส่งใหม่')progress.allowRetry=true;
     await env.DB.prepare("UPDATE trello_jobs SET status='pending',next_at=0,progress=? WHERE id=?").bind(JSON.stringify(progress),job.id).run();return reply({ok:true});
   }
   if(p==='/api/trello/send'){
-    validRequest(b);if(s.requests.includes(b.requestId))return reply({duplicate:true});const tag=uid();s.syncCommitTag=tag;const jobs=[],extra=[];
+    validRequest(b);if(syncProgramOnly(s,b.kind,syncRecord(s,b.kind,b.recordId)))fail('ข้อมูลเงินเดือนและหลักฐานเก็บเฉพาะในโปรแกรม',403);if(s.requests.includes(b.requestId))return reply({duplicate:true});const tag=uid();s.syncCommitTag=tag;const jobs=[],extra=[];
     const prepared=await syncPrepare(env,s,u,b.kind,b.recordId,b.trello,url.origin,tag,'ส่งจากหน้ารายการ');assert(prepared.queued,'เลือกปลายทาง Trello ก่อนส่ง');extra.push(...prepared.statements);jobs.push(prepared.id);
-    const files=(await env.DB.prepare('SELECT id FROM attachments WHERE record_id=? LIMIT 100').bind(b.recordId).all()).results;for(const f of files){const q=await syncPrepare(env,s,u,b.kind,b.recordId,b.trello,url.origin,tag,'แนบหลักฐาน',f.id);extra.push(...q.statements);jobs.push(q.id);}
+    const files=(await env.DB.prepare('SELECT id FROM attachments WHERE record_id=? LIMIT 100').bind(b.recordId).all()).results;for(const f of files){const q=await syncPrepare(env,s,u,b.kind,b.recordId,b.trello,url.origin,tag,'แนบหลักฐาน',f.id);extra.push(...q.statements);if(q.queued)jobs.push(q.id);}
     s.requests.push(b.requestId);await commit(env,row,s,extra);return reply({ok:true,jobs});
   }
   return null;
@@ -157,9 +158,17 @@ function validateRestore(backup){
   assert(Array.isArray(backup.attachments||[])&&(backup.attachments||[]).length<=500,'ไฟล์แนบเกินจำนวนที่รองรับ');
   const receiptEntries=new Set(),receiptNumbers=new Set();assert(Array.isArray(s.receipts||[]),'ข้อมูลใบเสร็จไม่ถูกต้อง');for(const r of s.receipts||[]){const entry=s.entries.find(e=>e.id===r.entryId&&e.type==='income'&&e.amount===r.amount);assert(entry&&r.date===entry.date&&typeof r.number==='string'&&r.number&&typeof r.note==='string'&&r.customer&&typeof r.customer.name==='string'&&!receiptEntries.has(r.entryId)&&!receiptNumbers.has(r.number),'ข้อมูลใบเสร็จไม่ถูกต้อง');receiptEntries.add(r.entryId);receiptNumbers.add(r.number);}validateSignatureBackup(backup);return receiptsInitial(payrollInitial(s));
 }
+async function recordAttachment(env,u,b,origin,rawBytes=null){
+  requireWriter(u);assert(b.payrollOnly===undefined||typeof b.payrollOnly==='boolean','ประเภทหลักฐานไม่ถูกต้อง');if(b.payrollOnly)requireOwner(u);const row=await readState(env),found=recordForAttachment(row.state,b.recordId,u);if(b.requestId){assert(typeof b.requestId==='string'&&b.requestId.length<=160,'เลขคำขอไฟล์ไม่ถูกต้อง');const old=await env.DB.prepare('SELECT r.attachment_id,a.record_id,p.attachment_id AS payrollOnly FROM attachment_requests r JOIN attachments a ON a.id=r.attachment_id LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id WHERE r.request_id=?').bind(b.requestId).first();if(old){assert(!b.payrollOnly||!!old.payrollOnly,'คำขอเดิมเป็นไฟล์ทั่วไป กรุณาตรวจไฟล์เดิมและใช้คำขอใหม่สำหรับหลักฐานเงินเดือน');assert(old.record_id===b.recordId,'เลขคำขอไฟล์อ้างอิงรายการอื่น');if(old.payrollOnly)requireOwner(u);return {id:old.attachment_id,duplicate:true,payrollOnly:!!old.payrollOnly};}}assert(supportedFiles.includes(b.mime),'รองรับ PNG, JPG, WebP, PDF');const bytes=rawBytes||fromBase64(b.base64);assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์ต้องไม่เกิน 10 MB');if(b.mime==='application/pdf')assert(new TextDecoder().decode(bytes.slice(0,5))==='%PDF-','ไฟล์ PDF ไม่ถูกต้อง');const id=uid();await env.BUCKET.put('attachments/'+id,bytes);row.state.attachmentRevision=id;const tag=uid();row.state.syncCommitTag=tag;const payrollOnly=b.payrollOnly===true||syncProgramOnly(row.state,found.kind,found.record),queue=payrollOnly?{statements:[],queued:false}:await syncPrepare(env,row.state,u,found.kind,b.recordId,b.trello,origin,tag,'แนบหลักฐาน',id);
+    await commit(env,row,row.state,[env.DB.prepare("INSERT INTO attachments SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.attachmentRevision')=?)").bind(id,b.recordId,String(b.name).slice(0,180),b.mime,'',u.id,id),...(b.requestId?[env.DB.prepare("INSERT OR IGNORE INTO attachment_requests SELECT ?,? WHERE EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.attachmentRevision')=?)").bind(b.requestId,id,id)]:[]),...(payrollOnly?[env.DB.prepare("INSERT OR IGNORE INTO payroll_private_attachments SELECT ? WHERE EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.attachmentRevision')=?)").bind(id,id)]:[]),...queue.statements]);return {id,payrollOnly,jobs:queue.queued?[queue.id]:[]};
+}
+function mcpHandlers(req,env,url){
+  async function access(u,recordId,payrollOnly=false){const current=await userFor(req,env);requireWriter(current);assert(current.id===u.id,'บัญชีผู้เรียกเปลี่ยน');if(payrollOnly)requireOwner(current);const {state}=await readState(env),found=recordForAttachment(state,recordId,current);return {user:current,programOnly:payrollOnly||syncProgramOnly(state,found.kind,found.record)};}
+  return {parse:()=>body(req),respond:reply,session:()=>userFor(req,env),load:async u=>{const out=visibleState((await readState(env)).state,u),ids=new Set(Object.values(syncCollections).flatMap(col=>(out[col]||[]).map(x=>x.id)));out.attachments=(await attachmentRows(env)).filter(a=>u.role==='owner'||!a.payrollOnly&&ids.has(a.record_id)).map(a=>({id:a.id,recordId:a.record_id,name:a.name,mime:a.mime,payrollOnly:a.payrollOnly}));return out;},save:async(u,b)=>{const current=await userFor(req,env);requireWriter(current);return recordAction(env,{...current,name:current.name+' (AI)'},b,url.origin);},lookup:key=>env.DB.prepare('SELECT fingerprint FROM ai_requests WHERE id=?').bind(key).first(),remember:(key,fingerprint)=>env.DB.prepare('INSERT OR IGNORE INTO ai_requests(id,fingerprint) VALUES(?,?)').bind(key,fingerprint).run(),authorizeAttachment:async(u,id,privateFile)=>(await access(u,id,privateFile)).programOnly,existingAttachment:async(u,id,key)=>{const current=await access(u,id),file=await env.DB.prepare('SELECT a.id,a.record_id,a.name,p.attachment_id AS payrollOnly FROM attachment_requests r JOIN attachments a ON a.id=r.attachment_id LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id WHERE r.request_id=?').bind(key).first();if(!file)return null;assert(file.record_id===id,'คำขอไฟล์อ้างอิงรายการอื่น');if(file.payrollOnly)requireOwner(current.user);return {...file,payrollOnly:!!file.payrollOnly};},attach:async(u,b,bytes)=>{const current=await access(u,b.recordId,b.payrollOnly);return recordAttachment(env,current.user,b,url.origin,bytes);}};
+}
 async function handle(req,env){
   const url=new URL(req.url),p=url.pathname;
-  if(p==='/mcp')return handleMcp(req,{parse:()=>body(req),respond:reply,session:()=>userFor(req,env),load:async u=>visibleState((await readState(env)).state,u),save:async(u,b)=>{requireWriter(u);return recordAction(env,{...u,name:u.name+' (AI)'},b,url.origin);},lookup:key=>env.DB.prepare('SELECT fingerprint FROM ai_requests WHERE id=?').bind(key).first(),remember:(key,fingerprint)=>env.DB.prepare('INSERT OR IGNORE INTO ai_requests(id,fingerprint) VALUES(?,?)').bind(key,fingerprint).run()});
+  if(p==='/mcp')return handleMcp(req,mcpHandlers(req,env,url));
   if(req.method==='GET'&&assets[p]){const a=assets[p];return reply(a.body,200,a.type);}
   if(p==='/api/health')return reply({ok:true,storage:'D1',version:'2.0'});
   if(!p.startsWith('/api/'))return reply({error:'ไม่พบหน้า'},404);
@@ -182,7 +191,7 @@ async function handle(req,env){
   }
   if(p==='/api/state'&&req.method==='GET'){
     const {state}=await readState(env),out=visibleState(state,u);out.attachmentList=[];
-    if(u.role!=='viewer'){const ids=new Set(Object.values(syncCollections).flatMap(col=>(out[col]||[]).map(x=>x.id)));out.attachmentList=(await env.DB.prepare('SELECT id,record_id AS recordId,name,mime FROM attachments').all()).results.filter(a=>u.role==='owner'||ids.has(a.recordId));}
+    if(u.role!=='viewer'){const ids=new Set(Object.values(syncCollections).flatMap(col=>(out[col]||[]).map(x=>x.id)));out.attachmentList=(await env.DB.prepare('SELECT a.id,a.record_id AS recordId,a.name,a.mime,p.attachment_id AS payrollOnly FROM attachments a LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id').all()).results.filter(a=>u.role==='owner'||!a.payrollOnly&&ids.has(a.recordId));}
     out.trelloConfigured=u.role!=='viewer'&&!!await env.DB.prepare("SELECT id FROM secrets WHERE id='trello'").first();
     out.syncJobs=await syncVisible(env,u);out.syncRoutes=u.role==='viewer'?[]:(await env.DB.prepare('SELECT kind,record_id AS recordId,target FROM trello_routes '+(u.role==='owner'?'':"WHERE scope='business'")).all()).results.map(r=>({...r,target:JSON.parse(r.target)})).filter(r=>u.role==='owner'||r.target.boardId===state.trello.boardId);
     out.members=u.role==='owner'?(await env.DB.prepare('SELECT email,name,role FROM members ORDER BY email').all()).results:[];
@@ -223,12 +232,9 @@ async function handle(req,env){
     for(const a of b.backup.attachments||[]){const meta=attachmentMetadata(a),bytes=fromBase64(a.body);assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์หลักฐานเกิน 10 MB');await env.BUCKET.put('attachments/'+meta.id,bytes);files.push(meta);}
     await applyRestore(env,u,row,next,files);return reply({ok:true});
   }
-  if(p==='/api/attachment'&&req.method==='POST'){
-    const b=await body(req),row=await readState(env),found=recordForAttachment(row.state,b.recordId,u);if(b.requestId){assert(typeof b.requestId==='string'&&b.requestId.length<=160,'เลขคำขอไฟล์ไม่ถูกต้อง');const old=await env.DB.prepare('SELECT attachment_id FROM attachment_requests WHERE request_id=?').bind(b.requestId).first();if(old)return reply({id:old.attachment_id,duplicate:true});}assert(supportedFiles.includes(b.mime),'รองรับ PNG, JPG, WebP, PDF');const bytes=fromBase64(b.base64);assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์ต้องไม่เกิน 10 MB');if(b.mime==='application/pdf')assert(new TextDecoder().decode(bytes.slice(0,5))==='%PDF-','ไฟล์ PDF ไม่ถูกต้อง');const id=uid();await env.BUCKET.put('attachments/'+id,bytes);row.state.attachmentRevision=id;const tag=uid();row.state.syncCommitTag=tag;const queue=await syncPrepare(env,row.state,u,found.kind,b.recordId,b.trello,url.origin,tag,'แนบหลักฐาน',id);
-    await commit(env,row,row.state,[env.DB.prepare("INSERT INTO attachments SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.attachmentRevision')=?)").bind(id,b.recordId,String(b.name).slice(0,180),b.mime,'',u.id,id),...(b.requestId?[env.DB.prepare("INSERT OR IGNORE INTO attachment_requests SELECT ?,? WHERE EXISTS(SELECT 1 FROM app_state WHERE json_extract(json,'$.attachmentRevision')=?)").bind(b.requestId,id,id)]:[]),...queue.statements]);return reply({id,jobs:queue.queued?[queue.id]:[]});
-  }
+  if(p==='/api/attachment'&&req.method==='POST')return reply(await recordAttachment(env,u,await body(req),url.origin));
   if(p.startsWith('/api/file/')&&req.method==='GET'){
-    requireWriter(u);const a=await env.DB.prepare('SELECT * FROM attachments WHERE id=?').bind(p.split('/').pop()).first();assert(a,'ไม่พบไฟล์');const {state}=await readState(env),s=visibleState(state,u);recordForAttachment(state,a.record_id,u);const file=a.base64?null:await env.BUCKET.get('attachments/'+a.id);assert(a.base64||file,'ไม่พบไฟล์หลักฐาน');return reply(a.base64?fromBase64(a.base64):await file.arrayBuffer(),200,a.mime,{'Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(a.name)});
+    requireWriter(u);const a=await env.DB.prepare('SELECT * FROM attachments WHERE id=?').bind(p.split('/').pop()).first();assert(a,'ไม่พบไฟล์');if(await env.DB.prepare('SELECT attachment_id FROM payroll_private_attachments WHERE attachment_id=?').bind(a.id).first())requireOwner(u);const {state}=await readState(env),s=visibleState(state,u);recordForAttachment(state,a.record_id,u);const file=a.base64?null:await env.BUCKET.get('attachments/'+a.id);assert(a.base64||file,'ไม่พบไฟล์หลักฐาน');return reply(a.base64?fromBase64(a.base64):await file.arrayBuffer(),200,a.mime,{'Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(a.name)});
   }
   if(p.startsWith('/api/trello/')&&req.method==='POST'){
     requireOwner(u);const b=await body(req);

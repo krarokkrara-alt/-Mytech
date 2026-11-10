@@ -18,7 +18,7 @@ function aiHarness(){
 
 test('MCP discovery, JSON-RPC validation and cross-origin protection do not expose records',async()=>{
   const h=aiHarness();let r=await h.request({jsonrpc:'2.0',id:1,method:'server/discover'},{role:'anonymous'});assert.deepEqual(r.body.result.supportedVersions,['2026-07-28']);
-  r=await h.request({jsonrpc:'2.0',id:2,method:'tools/list'},{role:'anonymous'});assert.equal(r.body.result.tools.length,4);assert.ok(!JSON.stringify(r.body).includes('secrets'));
+  r=await h.request({jsonrpc:'2.0',id:2,method:'tools/list'},{role:'anonymous'});assert.equal(r.body.result.tools.length,5);assert.ok(!JSON.stringify(r.body).includes('secrets'));
   assert.equal((await h.request('{bad')).body.error.code,-32700);assert.equal((await h.request([])).body.error.code,-32600);assert.equal((await h.request({method:'ping'})).body.error.code,-32600);
   assert.equal((await h.request({jsonrpc:'2.0',id:3,method:'unknown'})).body.error.code,-32601);
   assert.equal((await h.request(null,{method:'GET'})).status,405);assert.equal((await h.request({}, {contentType:'text/plain'})).status,415);

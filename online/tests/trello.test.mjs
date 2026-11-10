@@ -97,13 +97,13 @@ test('invoice, quote and automatic receipt export standalone Thai document files
   await h.action('reverse',{id:income.id,date:'2026-11-08',note:'ยกเลิกรับงวดนี้'});await drain(h,remote);
   const state=(await h.call('/api/state')).body;assert.equal(state.summary.income,0);assert.equal(state.receipts[0].status,'cancelled');assert.ok(remote.comments.some(c=>c.data.text.includes('ยกเลิก/กลับรายการแล้ว')));
 });
-test('salary reversal remains private and updates an explicitly linked payroll card',async()=>{
+test('salary and its reversal remain app-only even when an explicit Trello target is supplied',async()=>{
   const h=trelloHarness(),remote=remoteTrello();await h.post('/api/trello/auto',newTarget);
   const employee=(await h.action('employee',{code:'P1',name:'Private person',baseSalary:'200'})).body.result;
   const salary=(await h.action('payrollSave',{employeeId:employee.id,month:'2026-11',baseSalary:'200'},newTarget)).body.result;
   const paid=(await h.action('payrollPay',{id:salary.id,accountId:h.accountId,date:'2026-11-08'})).body.result;await drain(h,remote);
   await h.action('reverse',{id:paid.paymentEntryId,date:'2026-11-08',note:'Reverse payroll'});await drain(h,remote);
-  const jobs=h.DB.raw.prepare('SELECT kind,scope,snapshot FROM trello_jobs').all();assert.ok(jobs.every(j=>j.scope==='private'));assert.ok(remote.comments.some(c=>c.data.text.includes('ยังไม่จ่าย / กลับรายการจ่ายแล้ว')));
+  const jobs=h.DB.raw.prepare('SELECT kind,scope,snapshot FROM trello_jobs').all();assert.equal(jobs.length,0);assert.equal(remote.comments.length,0);assert.equal(remote.cards.length,0);assert.equal(remote.files.length,0);
 });
 test('entry opt-out also suppresses related invoice and automatic receipt updates',async()=>{
   const h=trelloHarness(),customer=(await h.action('customer',{name:'A'})).body.result,invoice=(await h.action('document',{customerId:customer.id,date:'2026-11-08',kind:'invoice',items:[{description:'A',quantity:'1',price:'500'}]},newTarget)).body.result;
