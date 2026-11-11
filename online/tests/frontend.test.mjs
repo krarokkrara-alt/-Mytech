@@ -10,6 +10,19 @@ function ui(){const nodes=new Map(),node=selector=>{if(!nodes.has(selector))node
   vm.runInContext(assets['/app.js'].body,ctx);
   const s={...initial(),employees:[],payroll:[],members:[],attachmentList:[],trelloConfigured:false};s.summary=summary(s);ctx.fixture=s;vm.runInContext("S=fixture; U={id:'owner',name:'Owner',role:'owner'}",ctx);return {ctx,node,run:code=>vm.runInContext(code,ctx)};
 }
+
+test('Invoice edit controls are visible to writers, prefill the existing document and submit its original ID/revision',async()=>{
+  const h=ui();h.run("S.customers=[{id:'customer',name:'Registry name'}];S.documents=[{id:'invoice',number:'INV-2026-0001',kind:'invoice',status:'issued',date:'2026-10-30',due:'2026-11-20',customerId:'customer',customer:{name:'Snapshot name',address:'Old address'},items:[{description:'ECU service',quantity:1500,unitPrice:12345,total:18518}],subtotal:18518,discount:0,total:18518,note:'Original conditions',revision:2}];openModal=(title,content,callback,label)=>{globalThis.editCapture={title,content,callback,label}};setupTrelloForm=(action,id)=>{globalThis.editRoute={action,id}};act=async(action,payload)=>({action,payload});");
+  assert.ok(h.run('documentsView()').includes('data-act="editdoc:invoice"'));
+  h.run("documentDispatch('editdoc','invoice')");let content=h.run('editCapture.content');
+  for(const value of ['INV-2026-0001','Snapshot name','ECU service','123.45','2026-10-30','2026-11-20','Original conditions','editReason'])assert.ok(content.includes(value));
+  assert.equal(h.run('editRoute.id'),'invoice');assert.equal(h.run('editCapture.label'),'บันทึกการแก้ไข');
+  h.ctx.document.querySelectorAll=()=>[{querySelector:selector=>({value:selector==='.description'?'Changed service':selector==='.quantity'?'1.5':'200.25'})}];
+  const saved=await h.run("editCapture.callback({customerId:'customer',date:'2026-10-30',discount:'0',note:'Changed',editReason:'Correct service'})");
+  assert.equal(saved.action,'document');assert.equal(saved.payload.id,'invoice');assert.equal(saved.payload.expectedRevision,2);assert.equal(saved.payload.items[0].price,'200.25');
+  h.run("U={id:'visitor',name:'Visitor',role:'viewer'}");assert.ok(!h.run('documentsView()').includes('data-act="editdoc:'));
+  h.run("U={id:'owner',name:'Owner',role:'owner'};S.documents[0].status='cancelled'");assert.ok(!h.run('documentsView()').includes('data-act="editdoc:'));
+});
 test('online scripts load together, all owner views render and payroll has configurable rows',()=>{
   const h=ui();for(const page of ['dashboard','wallet','customers','stock','purchase','debt','report','documents','trello','review','settings','payroll','access'])assert.equal(typeof h.run(`views['${page}']()`),'string');
   const row=h.run("salaryRow({label:'OT <unsafe>',amount:12345})");assert.ok(row.includes('OT &lt;unsafe&gt;'));assert.ok(row.includes('123.45'));

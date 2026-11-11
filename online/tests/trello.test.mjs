@@ -6,6 +6,15 @@ import {database,bucket} from './db.mjs';
 import {syncFlush,syncAcquireLock,syncReleaseLock} from '../worker/trello-sync.mjs';
 
 const boardId='a'.repeat(24),listId='b'.repeat(24),user={id:'owner-id',name:'Owner',role:'owner'};
+
+test('editing an Invoice updates its existing Trello route and report balance without creating another document',async()=>{
+  const h=trelloHarness(),c=(await h.action('customer',{name:'Customer'})).body.result;
+  const d=(await h.action('document',{kind:'invoice',customerId:c.id,date:'2026-11-11',items:[{description:'Original service',quantity:'1',price:'100'}]},{enabled:true,boardId,listId})).body.result;
+  const remote=remoteTrello();await syncFlush(h.env,remote.api);
+  const revised=await h.action('document',{id:d.id,expectedRevision:1,editReason:'Correct service price',kind:'invoice',customerId:c.id,date:'2026-11-11',items:[{description:'Updated service',quantity:'1',price:'125.50'}]});assert.equal(revised.status,200);
+  await syncFlush(h.env,remote.api);assert.equal(remote.cards.length,1);assert.equal(remote.comments.length,2);assert.ok(remote.comments[1].data.text.includes('125.50'));assert.ok(remote.comments[1].data.text.includes('Updated service'));
+  const s=(await h.call('/api/state')).body;assert.equal(s.documents.length,1);assert.equal(s.summary.receivable,12550);assert.equal(s.summary.income,0);
+});
 function trelloHarness(){
   const DB=database(),env={DB,BUCKET:bucket(),OWNER_EMAIL:'owner@example.test',DATA_KEY:Buffer.alloc(32,7).toString('base64')};let state=initial();state.trello={...state.trello,boardId,boardName:'MY TECH test',lists:[{id:listId,name:'บัญชี'}],cards:[],boards:[{id:boardId,name:'MY TECH test'}]};
   const account=mutate(state,'account',{name:'Bank',scope:'business'},user);state=account.state;state=mutate(state,'entry',{type:'opening',accountId:account.result.id,amount:'100000',date:'2026-11-08',note:'Opening'},user).state;

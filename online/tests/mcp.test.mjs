@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import worker from '../worker/index.mjs';
 import {database,bucket} from './db.mjs';
 
+test('MCP edits an existing Invoice with revision and reason without duplicating its ID or revenue',async()=>{
+  const h=aiHarness(),schema=(await h.call('mytech_action_schema',{action:'document'})).result.payloadSchema;
+  for(const key of ['id','expectedRevision','editReason','customerName','clearDue'])assert.ok(schema.properties[key]);
+  const c=(await h.save('customer',{name:'Invoice customer'})).result.result;
+  const original=(await h.save('document',{kind:'invoice',customerId:c.id,date:'2026-11-11',items:[{description:'Service',quantity:'1',price:'100'}]})).result.result;
+  const payload={id:original.id,expectedRevision:1,editReason:'Correct price',kind:'invoice',customerId:c.id,date:'2026-11-11',items:[{description:'Service',quantity:'1',price:'150'}],customerName:'Corrected customer'};
+  const r=await h.save('document',payload);assert.equal(r.error,false);assert.equal(r.result.result.id,original.id);assert.equal(r.result.result.number,original.number);
+  const state=await h.state();assert.equal(state.documents.length,1);assert.equal(state.documents[0].total,15000);assert.equal(state.entries.length,0);
+  const stale=await h.save('document',payload);assert.equal(stale.error,true);assert.equal((await h.state()).documents[0].revision,2);
+});
+
 function aiHarness(){
   const DB=database(),env={DB,BUCKET:bucket(),OWNER_EMAIL:'owner@example.test',DATA_KEY:Buffer.alloc(32,4).toString('base64')},tasks=[];
   async function request(message,{role='owner',method='POST',origin,contentType='application/json'}={}){

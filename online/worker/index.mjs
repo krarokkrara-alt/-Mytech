@@ -214,7 +214,7 @@ async function handle(req,env){
     return reply({ok:true});
   }
   if(p==='/api/document'&&req.method==='GET'){
-    const {state}=await readState(env),s=visibleState(state,u),doc=s.documents.find(d=>d.id===url.searchParams.get('id'));assert(doc,'ไม่พบเอกสาร');if(u.role!=='viewer')doc.company=await hydrateSignature(env,doc.company||{...s.company,signature:null});return reply(documentHtml(s,doc),200,'text/html; charset=utf-8');
+    const {state}=await readState(env),s=visibleState(state,u),doc=s.documents.find(d=>d.id===url.searchParams.get('id'));assert(doc,'ไม่พบเอกสาร');if(u.role!=='viewer')doc.company=await hydrateSignature(env,doc.company||{...s.company,signature:null});return reply(documentHtml(s,doc,{canEdit:['owner','staff'].includes(u.role)}),200,'text/html; charset=utf-8');
   }
   if(p==='/api/receipt'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u),receipt=(s.receipts||[]).find(r=>r.id===url.searchParams.get('id'));assert(receipt,'ไม่พบใบเสร็จ');if(u.role!=='viewer')receipt.company=await hydrateSignature(env,receipt.company||{...s.company,signature:null});return reply(receiptHtml(s,receipt),200,'text/html; charset=utf-8');}
   if(p==='/api/bill'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u);syncAssertAccess(state,'bill',url.searchParams.get('id'),u);const bill=(s.bills||[]).find(b=>b.id===url.searchParams.get('id'));assert(bill,'ไม่พบบิล');if(u.role!=='viewer')bill.company=await hydrateSignature(env,bill.company||{...s.company,signature:null});return reply(billHtml(s,bill),200,'text/html; charset=utf-8');}
