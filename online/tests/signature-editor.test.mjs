@@ -42,3 +42,20 @@ test('pending signature save locks drawing and editor tools until the captured i
   assert.equal(h.canvas.style.pointerEvents,'none');h.node('#signature-clear').onclick();assert.equal(h.alpha,255);h.canvas.onpointerdown(h.event());assert.equal(h.node('#signature-pad').pointer,null);
   h.releaseSave();await saved;assert.equal(h.node('#signature-clear').disabled,false);assert.equal(h.canvas.style.pointerEvents,'');
 });
+
+test('signature settings show verified readiness and unsigned document counts, hiding application without a usable image',()=>{
+  const h=editor({signature:{assetId:'stored-image',name:'Owner'}});
+  h.run("btn=(label,command)=>'<button data-action=\"'+command+'\">'+label+'</button>';S.signatureStatus={configured:false,error:'ไม่พบไฟล์ลายเซ็น',unsigned:{documents:2,receipts:1,payroll:3,bills:4,total:10}}");
+  let html=h.run('signaturePanel()');assert.ok(html.includes('ไม่พบไฟล์ลายเซ็น'));assert.ok(html.includes('10 ฉบับ'));assert.ok(html.includes('สลิปเงินเดือน: 3 ฉบับ'));assert.ok(html.includes('บันทึกบิลค่าใช้จ่าย: 4 ฉบับ'));assert.ok(!html.includes('signature-apply-unsigned'));assert.ok(!html.includes('<img'));
+  h.run('S.signatureStatus.configured=true');html=h.run('signaturePanel()');assert.ok(html.includes('ตรวจพบไฟล์รูปลายเซ็นจริง'));assert.ok(html.includes('signature-apply-unsigned'));assert.ok(html.includes('<img'));assert.ok(html.includes('รายงานการเงินใช้ลายเซ็นปัจจุบัน'));
+  h.run('S.signatureStatus.unsigned={documents:0,receipts:0,payroll:0,bills:0,total:0}');assert.ok(!h.run('signaturePanel()').includes('signature-apply-unsigned'));
+});
+
+test('applying the current signature requires an owner confirmation listing every unsigned collection',async()=>{
+  const h=editor();h.run("S.signatureStatus={configured:true,unsigned:{documents:2,receipts:1,payroll:3,bills:4,total:10}};openModal=(title,html,callback)=>{globalThis.signatureTestModal={title,html,callback}};");
+  assert.equal(await h.run("signatureUiDispatch('signature-apply-unsigned')"),true);assert.equal(h.calls.length,0);
+  const html=h.run('signatureTestModal.html');for(const value of ['10 ฉบับ','ใบเสนอราคา / Invoice: 2','ใบเสร็จรับเงิน: 1','สลิปเงินเดือน: 3','บันทึกบิลค่าใช้จ่าย: 4','เอกสารที่มีลายเซ็นแล้วจะเก็บลายเซ็นเดิม'])assert.ok(html.includes(value));
+  await h.run('signatureTestModal.callback()');assert.equal(h.calls.length,1);assert.equal(h.calls[0].path,'/api/company/signature/apply-unsigned');assert.equal(Object.keys(h.calls[0].payload).length,0);
+  const absent=editor();await absent.run("signatureUiDispatch('signature-apply-unsigned')");assert.equal(absent.calls.length,0);
+  const staff=editor({role:'staff'});staff.run('S.signatureStatus={configured:true,unsigned:{documents:1}}');await staff.run("signatureUiDispatch('signature-apply-unsigned')");assert.equal(staff.calls.length,0);
+});

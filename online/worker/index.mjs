@@ -5,7 +5,10 @@ import {assets,seedState} from './generated.mjs';
 import {receiptsInitial,issueReceipt,receiptHtml} from './receipts.mjs';
 import {syncCollections,syncRecord,syncScope,syncAssertAccess,syncActionKind,syncPrepare,syncProgramOnly,syncJobProgramOnly,syncVisible,syncValidateTarget,syncFlush,syncAcquireLock,syncReleaseLock} from './trello-sync.mjs';
 import {signatureReferences,signatureCompanies,validateSignatureBackup,validateSignatureBytes,hydrateSignature,prepareSignatureRestore} from './signature.mjs';
+import {signatureStatus,applyUnsignedSignatures} from './signature-status.mjs';
 import {handleMcp} from './mcp.mjs';
+import {billsInitial,billMutate,validateBills,billHtml} from './bills.mjs';
+import {financialReportHtml} from '../my-tech-accounting/report-documents.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'",'Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 function reply(body,status=200,type='application/json; charset=utf-8',extra={}){return new Response(type.startsWith('application/json')?JSON.stringify(body):body,{status,headers:{...headers,'Content-Type':type,...extra}});}
@@ -25,17 +28,17 @@ async function userFor(req,env){
 async function readState(env){
   await env.DB.prepare('INSERT OR IGNORE INTO app_state(id,revision,json) VALUES(1,0,?)').bind(JSON.stringify(payrollInitial({...initial(),...seedState}))).run();
   const row=await env.DB.prepare('SELECT revision,json FROM app_state WHERE id=1').first();
-  return {revision:row.revision,state:receiptsInitial(payrollInitial({...initial(),...JSON.parse(row.json)}))};
+  return {revision:row.revision,state:billsInitial(receiptsInitial(payrollInitial({...initial(),...JSON.parse(row.json)})))};
 }
 const sanitizeCustomer=c=>({...c,phone:'',line:'',address:'',taxId:'',note:''});
 export function visibleState(s,u){
   const copy=structuredClone(s);
   if(u.role!=='owner'){
     copy.accounts=copy.accounts.filter(a=>a.scope==='business');const ids=new Set(copy.accounts.map(a=>a.id));
-    copy.entries=copy.entries.filter(e=>ids.has(e.accountId));copy.debts=copy.debts.filter(d=>d.scope==='business');
+    copy.entries=copy.entries.filter(e=>ids.has(e.accountId));copy.bills=(copy.bills||[]).filter(b=>b.scope==='business');copy.debts=copy.debts.filter(d=>d.scope==='business');
     const salaryIds=new Set(copy.entries.filter(e=>e.payrollId).map(e=>e.id)),totals=new Map();
     for(const e of active(copy).filter(e=>e.payrollId)){
-      const key=e.accountId+':'+e.date,prev=totals.get(key)||{id:'salary-summary-'+key,date:e.date,accountId:e.accountId,type:'expense',amount:0,cash:0,project:'เงินเดือนรวม',note:'ค่าใช้จ่ายเงินเดือนรวมประจำวัน · รายละเอียดเฉพาะเจ้าของ',by:'ระบบสรุป',createdAt:e.createdAt};
+      const key=e.accountId+':'+e.date,prev=totals.get(key)||{id:'salary-summary-'+key,date:e.date,accountId:e.accountId,type:'expense',amount:0,cash:0,project:'เงินเดือน',note:'ค่าใช้จ่ายเงินเดือนรวมประจำวัน · รายละเอียดเฉพาะเจ้าของ',by:'ระบบสรุป',createdAt:e.createdAt};
       prev.amount+=e.amount;prev.cash+=e.cash;totals.set(key,prev);
     }
     copy.entries=copy.entries.filter(e=>!salaryIds.has(e.id)&&!salaryIds.has(e.reverses)).concat([...totals.values()]);
@@ -66,12 +69,14 @@ async function recordAction(env,u,b,origin){
   validRequest(b);const row=await readState(env);
   const saved=await env.DB.prepare('SELECT scope,response FROM action_results WHERE request_id=?').bind(b.requestId).first();if(saved){if(saved.scope==='private')requireOwner(u);return {...JSON.parse(saved.response),duplicate:true};}
   if(row.state.requests.includes(b.requestId))fail('รายการนี้เคยบันทึกแล้ว กรุณาโหลดหน้าใหม่และตรวจรายการก่อนส่งอีกครั้ง',409);
-  let out;if(b.action==='issueReceipt'){const state=structuredClone(row.state),e=syncAssertAccess(state,'entry',b.payload?.entryId,u);out={state,result:issueReceipt(state,e,u,b.payload)};state.revision++;}else out=['employee','payrollSave','payrollPay','payrollCancel'].includes(b.action)?payrollMutate(row.state,b.action,b.payload||{},u):mutate(row.state,b.action,b.payload||{},u);
+  let out;if(b.action==='issueReceipt'){const state=structuredClone(row.state),e=syncAssertAccess(state,'entry',b.payload?.entryId,u);out={state,result:issueReceipt(state,e,u,b.payload)};state.revision++;}else out=['billSave','billPay','billCancel'].includes(b.action)?billMutate(row.state,b.action,b.payload||{},u):['employee','payrollSave','payrollPay','payrollCancel'].includes(b.action)?payrollMutate(row.state,b.action,b.payload||{},u):mutate(row.state,b.action,b.payload||{},u);
   const s=out.state;s.receipts ||= [];const kind=syncActionKind(b.action),records=[],payload=b.payload||{};let primary=out.result;
   if(!primary&&kind){const col=syncCollections[kind];primary=syncRecord(s,kind,payload.id)||(s[col]||[]).find(r=>!(row.state[col]||[]).some(old=>old.id===r.id));}
   if(primary&&kind)records.push({kind,id:primary.id,explicit:b.trello});
   if(b.action==='entry'&&primary?.type==='income'){const receipt=issueReceipt(s,primary,u,payload);records.push({kind:'receipt',id:receipt.id,explicit:b.trello,parentKey:'entry:'+primary.id});}
   if(b.action==='reverse'){const original=s.entries.find(e=>e.id===payload.id),receipt=s.receipts.find(r=>r.entryId===original?.id);if(receipt){receipt.status='cancelled';records.push({kind:'receipt',id:receipt.id});}if(original?.invoiceId)records.push({kind:'document',id:original.invoiceId});if(original?.payrollId)records.push({kind:'payroll',id:original.payrollId});}
+  if(primary?.billId)records.push({kind:'bill',id:primary.billId});
+  if(b.action==='reverse'){const e=s.entries.find(e=>e.id===payload.id);if(e?.billId)records.push({kind:'bill',id:e.billId});}
   if(primary?.invoiceId&&b.action==='entry')records.push({kind:'document',id:primary.invoiceId});
   const courseEntry=b.action==='reverse'?s.entries.find(e=>e.id===payload.id):primary;if(courseEntry?.enrollmentId)for(const d of s.documents.filter(d=>d.kind==='invoice'&&d.enrollmentId===courseEntry.enrollmentId))records.push({kind:'document',id:d.id});
   const tag=uid(),extra=[],jobs=[];s.syncCommitTag=tag;
@@ -147,16 +152,16 @@ async function integrationApi(req,env,u,url){
 }
 function validateRestore(backup){
   assert(backup?.format==='MYTECH_BACKUP_V1'&&backup.state?.version===1,'ไฟล์สำรองไม่ถูกต้อง');
-  const s=backup.state,base=initial();assert(Object.keys(base).every(k=>k in s),'โครงสร้างข้อมูลไม่ครบ');
+  const s=billsInitial(backup.state),base=initial();assert(Object.keys(base).every(k=>k in s),'โครงสร้างข้อมูลไม่ครบ');
   for(const [k,v] of Object.entries(base))if(Array.isArray(v))assert(Array.isArray(s[k]),'ข้อมูล '+k+' ต้องเป็นรายการ');
   assert(s.company&&typeof s.company.name==='string'&&s.trello&&Array.isArray(s.trello.cards),'ข้อมูลกิจการไม่ครบ');
-  for(const k of ['accounts','entries','products','lots','customers','documents','debts','payroll','employees','receipts']){const rows=s[k]||[];assert(Array.isArray(rows),'ข้อมูล '+k+' ไม่ถูกต้อง');const ids=new Set();for(const row of rows){assert(row&&typeof row.id==='string'&&!ids.has(row.id),'รหัสรายการ '+k+' ซ้ำหรือไม่ถูกต้อง');ids.add(row.id);}}
+  for(const k of ['accounts','entries','products','lots','customers','documents','debts','payroll','employees','receipts','bills']){const rows=s[k]||[];assert(Array.isArray(rows),'ข้อมูล '+k+' ไม่ถูกต้อง');const ids=new Set();for(const row of rows){assert(row&&typeof row.id==='string'&&!ids.has(row.id),'รหัสรายการ '+k+' ซ้ำหรือไม่ถูกต้อง');ids.add(row.id);}}
   assert(s.entries.every(e=>s.accounts.some(a=>a.id===e.accountId)&&Number.isSafeInteger(e.amount)&&Number.isSafeInteger(e.cash)),'รายการเงินไม่ถูกต้อง');
   assert(s.lots.every(l=>s.products.some(p=>p.id===l.productId)&&Number.isSafeInteger(l.quantity)&&l.quantity>=0&&Number.isSafeInteger(l.value)&&l.value>=0),'ข้อมูลสต๊อกไม่ถูกต้อง');
   summary(s);
-  validatePayroll(payrollInitial(s));
+  validatePayroll(payrollInitial(s));validateBills(s);
   assert(Array.isArray(backup.attachments||[])&&(backup.attachments||[]).length<=500,'ไฟล์แนบเกินจำนวนที่รองรับ');
-  const receiptEntries=new Set(),receiptNumbers=new Set();assert(Array.isArray(s.receipts||[]),'ข้อมูลใบเสร็จไม่ถูกต้อง');for(const r of s.receipts||[]){const entry=s.entries.find(e=>e.id===r.entryId&&e.type==='income'&&e.amount===r.amount);assert(entry&&r.date===entry.date&&typeof r.number==='string'&&r.number&&typeof r.note==='string'&&r.customer&&typeof r.customer.name==='string'&&!receiptEntries.has(r.entryId)&&!receiptNumbers.has(r.number),'ข้อมูลใบเสร็จไม่ถูกต้อง');receiptEntries.add(r.entryId);receiptNumbers.add(r.number);}validateSignatureBackup(backup);return receiptsInitial(payrollInitial(s));
+  const receiptEntries=new Set(),receiptNumbers=new Set();assert(Array.isArray(s.receipts||[]),'ข้อมูลใบเสร็จไม่ถูกต้อง');for(const r of s.receipts||[]){const entry=s.entries.find(e=>e.id===r.entryId&&e.type==='income'&&e.amount===r.amount);assert(entry&&r.date===entry.date&&typeof r.number==='string'&&r.number&&typeof r.note==='string'&&r.customer&&typeof r.customer.name==='string'&&!receiptEntries.has(r.entryId)&&!receiptNumbers.has(r.number),'ข้อมูลใบเสร็จไม่ถูกต้อง');receiptEntries.add(r.entryId);receiptNumbers.add(r.number);}validateSignatureBackup(backup);return billsInitial(receiptsInitial(payrollInitial(s)));
 }
 async function recordAttachment(env,u,b,origin,rawBytes=null){
   requireWriter(u);assert(b.payrollOnly===undefined||typeof b.payrollOnly==='boolean','ประเภทหลักฐานไม่ถูกต้อง');if(b.payrollOnly)requireOwner(u);const row=await readState(env),found=recordForAttachment(row.state,b.recordId,u);if(b.requestId){assert(typeof b.requestId==='string'&&b.requestId.length<=160,'เลขคำขอไฟล์ไม่ถูกต้อง');const old=await env.DB.prepare('SELECT r.attachment_id,a.record_id,p.attachment_id AS payrollOnly FROM attachment_requests r JOIN attachments a ON a.id=r.attachment_id LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id WHERE r.request_id=?').bind(b.requestId).first();if(old){assert(!b.payrollOnly||!!old.payrollOnly,'คำขอเดิมเป็นไฟล์ทั่วไป กรุณาตรวจไฟล์เดิมและใช้คำขอใหม่สำหรับหลักฐานเงินเดือน');assert(old.record_id===b.recordId,'เลขคำขอไฟล์อ้างอิงรายการอื่น');if(old.payrollOnly)requireOwner(u);return {id:old.attachment_id,duplicate:true,payrollOnly:!!old.payrollOnly};}}assert(supportedFiles.includes(b.mime),'รองรับ PNG, JPG, WebP, PDF');const bytes=rawBytes||fromBase64(b.base64);assert(bytes.length>0&&bytes.length<=10*1024*1024,'ไฟล์ต้องไม่เกิน 10 MB');if(b.mime==='application/pdf')assert(new TextDecoder().decode(bytes.slice(0,5))==='%PDF-','ไฟล์ PDF ไม่ถูกต้อง');const id=uid();await env.BUCKET.put('attachments/'+id,bytes);row.state.attachmentRevision=id;const tag=uid();row.state.syncCommitTag=tag;const payrollOnly=b.payrollOnly===true||syncProgramOnly(row.state,found.kind,found.record),queue=payrollOnly?{statements:[],queued:false}:await syncPrepare(env,row.state,u,found.kind,b.recordId,b.trello,origin,tag,'แนบหลักฐาน',id);
@@ -164,7 +169,7 @@ async function recordAttachment(env,u,b,origin,rawBytes=null){
 }
 function mcpHandlers(req,env,url){
   async function access(u,recordId,payrollOnly=false){const current=await userFor(req,env);requireWriter(current);assert(current.id===u.id,'บัญชีผู้เรียกเปลี่ยน');if(payrollOnly)requireOwner(current);const {state}=await readState(env),found=recordForAttachment(state,recordId,current);return {user:current,programOnly:payrollOnly||syncProgramOnly(state,found.kind,found.record)};}
-  return {parse:()=>body(req),respond:reply,session:()=>userFor(req,env),load:async u=>{const out=visibleState((await readState(env)).state,u),ids=new Set(Object.values(syncCollections).flatMap(col=>(out[col]||[]).map(x=>x.id)));out.attachments=(await attachmentRows(env)).filter(a=>u.role==='owner'||!a.payrollOnly&&ids.has(a.record_id)).map(a=>({id:a.id,recordId:a.record_id,name:a.name,mime:a.mime,payrollOnly:a.payrollOnly}));return out;},save:async(u,b)=>{const current=await userFor(req,env);requireWriter(current);return recordAction(env,{...current,name:current.name+' (AI)'},b,url.origin);},lookup:key=>env.DB.prepare('SELECT fingerprint FROM ai_requests WHERE id=?').bind(key).first(),remember:(key,fingerprint)=>env.DB.prepare('INSERT OR IGNORE INTO ai_requests(id,fingerprint) VALUES(?,?)').bind(key,fingerprint).run(),authorizeAttachment:async(u,id,privateFile)=>(await access(u,id,privateFile)).programOnly,existingAttachment:async(u,id,key)=>{const current=await access(u,id),file=await env.DB.prepare('SELECT a.id,a.record_id,a.name,p.attachment_id AS payrollOnly FROM attachment_requests r JOIN attachments a ON a.id=r.attachment_id LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id WHERE r.request_id=?').bind(key).first();if(!file)return null;assert(file.record_id===id,'คำขอไฟล์อ้างอิงรายการอื่น');if(file.payrollOnly)requireOwner(current.user);return {...file,payrollOnly:!!file.payrollOnly};},attach:async(u,b,bytes)=>{const current=await access(u,b.recordId,b.payrollOnly);return recordAttachment(env,current.user,b,url.origin,bytes);}};
+  return {parse:()=>body(req),respond:reply,session:()=>userFor(req,env),load:async u=>{const state=(await readState(env)).state,out=visibleState(state,u),ids=new Set(Object.values(syncCollections).flatMap(col=>(out[col]||[]).map(x=>x.id)));if(u.role==='owner')out.signatureStatus=await signatureStatus(env,state);out.attachments=(await attachmentRows(env)).filter(a=>u.role==='owner'||!a.payrollOnly&&ids.has(a.record_id)).map(a=>({id:a.id,recordId:a.record_id,name:a.name,mime:a.mime,payrollOnly:a.payrollOnly}));return out;},save:async(u,b)=>{const current=await userFor(req,env);requireWriter(current);return recordAction(env,{...current,name:current.name+' (AI)'},b,url.origin);},lookup:key=>env.DB.prepare('SELECT fingerprint FROM ai_requests WHERE id=?').bind(key).first(),remember:(key,fingerprint)=>env.DB.prepare('INSERT OR IGNORE INTO ai_requests(id,fingerprint) VALUES(?,?)').bind(key,fingerprint).run(),authorizeAttachment:async(u,id,privateFile)=>(await access(u,id,privateFile)).programOnly,existingAttachment:async(u,id,key)=>{const current=await access(u,id),file=await env.DB.prepare('SELECT a.id,a.record_id,a.name,p.attachment_id AS payrollOnly FROM attachment_requests r JOIN attachments a ON a.id=r.attachment_id LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id WHERE r.request_id=?').bind(key).first();if(!file)return null;assert(file.record_id===id,'คำขอไฟล์อ้างอิงรายการอื่น');if(file.payrollOnly)requireOwner(current.user);return {...file,payrollOnly:!!file.payrollOnly};},attach:async(u,b,bytes)=>{const current=await access(u,b.recordId,b.payrollOnly);return recordAttachment(env,current.user,b,url.origin,bytes);}};
 }
 async function handle(req,env){
   const url=new URL(req.url),p=url.pathname;
@@ -180,7 +185,11 @@ async function handle(req,env){
     if(!req.headers.get('content-type')?.startsWith('application/json')||req.headers.get('x-csrf-token')!=='same-origin')fail('คำขอไม่ถูกต้อง กรุณาโหลดหน้าใหม่',403);
     requireWriter(u);
   }
+  if(p==='/api/company/signature/apply-unsigned'&&req.method==='POST'){
+    requireOwner(u);await body(req);const row=await readState(env),status=await signatureStatus(env,row.state);assert(status.configured,status.error||'กรุณาบันทึกรูปลายเซ็นก่อน');const applied=applyUnsignedSignatures(row.state,row.state.company.signature);row.state.revision++;row.state.audit.push({id:uid(),by:u.name,action:'signature_apply_unsigned',createdAt:new Date().toISOString(),note:'ใช้ลายเซ็นปัจจุบันกับเอกสารที่ยังไม่มี '+applied.total+' ฉบับ'});await commit(env,row,row.state);return reply({ok:true,applied});
+  }
   if(p==='/api/company/signature'&&req.method==='POST'){
+
     requireOwner(u);const b=await body(req),row=await readState(env);assert(typeof b.name==='string'&&b.name.length<=120&&typeof b.title==='string'&&b.title.length<=120,'ชื่อและตำแหน่งต้องไม่เกิน 120 ตัวอักษร');
     let signature=b.remove?null:{...(row.state.company.signature||{}),name:b.name.trim(),title:b.title.trim()};
     if(signature&&b.image){assert(typeof b.image.base64==='string','รูปแบบรูปลายเซ็นไม่ถูกต้อง');const bytes=fromBase64(b.image.base64);validateSignatureBytes(bytes,b.image.mime);const id=uid();await env.BUCKET.put('signatures/'+id,bytes);signature={...signature,assetId:id,mime:b.image.mime};}
@@ -190,7 +199,7 @@ async function handle(req,env){
     requireOwner(u);const id=p.split('/').pop(),{state}=await readState(env),ref=signatureReferences(state).find(r=>r.id===id);assert(ref,'ไม่พบลายเซ็น');const file=await env.BUCKET.get('signatures/'+id);assert(file,'ไม่พบไฟล์ลายเซ็น');return reply(await file.arrayBuffer(),200,ref.mime);
   }
   if(p==='/api/state'&&req.method==='GET'){
-    const {state}=await readState(env),out=visibleState(state,u);out.attachmentList=[];
+    const {state}=await readState(env),out=visibleState(state,u);out.attachmentList=[];if(u.role==='owner')out.signatureStatus=await signatureStatus(env,state);
     if(u.role!=='viewer'){const ids=new Set(Object.values(syncCollections).flatMap(col=>(out[col]||[]).map(x=>x.id)));out.attachmentList=(await env.DB.prepare('SELECT a.id,a.record_id AS recordId,a.name,a.mime,p.attachment_id AS payrollOnly FROM attachments a LEFT JOIN payroll_private_attachments p ON p.attachment_id=a.id').all()).results.filter(a=>u.role==='owner'||!a.payrollOnly&&ids.has(a.recordId));}
     out.trelloConfigured=u.role!=='viewer'&&!!await env.DB.prepare("SELECT id FROM secrets WHERE id='trello'").first();
     out.syncJobs=await syncVisible(env,u);out.syncRoutes=u.role==='viewer'?[]:(await env.DB.prepare('SELECT kind,record_id AS recordId,target FROM trello_routes '+(u.role==='owner'?'':"WHERE scope='business'")).all()).results.map(r=>({...r,target:JSON.parse(r.target)})).filter(r=>u.role==='owner'||r.target.boardId===state.trello.boardId);
@@ -208,6 +217,8 @@ async function handle(req,env){
     const {state}=await readState(env),s=visibleState(state,u),doc=s.documents.find(d=>d.id===url.searchParams.get('id'));assert(doc,'ไม่พบเอกสาร');if(u.role!=='viewer')doc.company=await hydrateSignature(env,doc.company||{...s.company,signature:null});return reply(documentHtml(s,doc),200,'text/html; charset=utf-8');
   }
   if(p==='/api/receipt'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u),receipt=(s.receipts||[]).find(r=>r.id===url.searchParams.get('id'));assert(receipt,'ไม่พบใบเสร็จ');if(u.role!=='viewer')receipt.company=await hydrateSignature(env,receipt.company||{...s.company,signature:null});return reply(receiptHtml(s,receipt),200,'text/html; charset=utf-8');}
+  if(p==='/api/bill'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u);syncAssertAccess(state,'bill',url.searchParams.get('id'),u);const bill=(s.bills||[]).find(b=>b.id===url.searchParams.get('id'));assert(bill,'ไม่พบบิล');if(u.role!=='viewer')bill.company=await hydrateSignature(env,bill.company||{...s.company,signature:null});return reply(billHtml(s,bill),200,'text/html; charset=utf-8');}
+  if(p==='/api/report'&&req.method==='GET'){const {state}=await readState(env),s=visibleState(state,u),filter={};for(const key of ['from','to','project','search']){const value=url.searchParams.get(key)||'';assert(value.length<=500,'ตัวกรองยาวเกินกำหนด');if(value)filter[key]=value;}for(const key of ['from','to'])if(filter[key])assert(/^\d{4}-\d{2}-\d{2}$/.test(filter[key])&&!Number.isNaN(Date.parse(filter[key]))&&new Date(filter[key]).toISOString().slice(0,10)===filter[key],'วันที่ไม่ถูกต้อง');assert(!filter.from||!filter.to||filter.from<=filter.to,'ช่วงวันที่ไม่ถูกต้อง');const company=u.role==='viewer'?{...s.company,signature:null}:await hydrateSignature(env,s.company);return reply(financialReportHtml(s,filter,{owner:u.role==='owner',company}),200,'text/html; charset=utf-8');}
   if(p==='/api/payslip'&&req.method==='GET'){requireOwner(u);const {state}=await readState(env),slip=state.payroll.find(x=>x.id===url.searchParams.get('id'));assert(slip,'ไม่พบสลิป');slip.company=await hydrateSignature(env,slip.company||{...state.company,signature:null});return reply(payslipHtml(state,slip),200,'text/html; charset=utf-8');}
   if(p==='/api/backup'&&req.method==='GET'){
     requireOwner(u);const row=await readState(env),attachments=await attachmentRows(env),current=await env.DB.prepare('SELECT revision FROM app_state WHERE id=1').first();if(current.revision!==row.revision)fail('ข้อมูลเปลี่ยนระหว่างสำรอง กรุณาดาวน์โหลดอีกครั้ง',409);return backupResponse(env,row.state,attachments);

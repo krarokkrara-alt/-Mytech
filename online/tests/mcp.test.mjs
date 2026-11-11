@@ -73,3 +73,18 @@ test('MCP issues documents and editable payroll drafts through the same model an
   const bad=await h.call('mytech_save',{action:'company',requestId:'not-permitted-action',payload:{name:'Bad'}});assert.equal(bad.error,true);
   await h.settle();
 });
+
+test('MCP records, lists and pays supplier bills once and enforces personal bill permissions',async()=>{
+  const h=aiHarness();await h.DB.prepare("INSERT INTO members VALUES(?,'staff',?)").bind('staff@example.test','Staff').run();
+  const status=(await h.call('mytech_status')).result;assert.ok(status.actions.some(a=>a.action==='billSave'));assert.ok(status.actions.some(a=>a.action==='billPay'));
+  const schema=(await h.call('mytech_action_schema',{action:'billSave'})).result;assert.ok(schema.payloadSchema.required.includes('vendor'));assert.equal(schema.moneyInput,'BAHT decimal strings');
+  const account=(await h.save('account',{name:'Supplier bank',scope:'business'})).result.result;await h.save('entry',{type:'opening',accountId:account.id,amount:'1000',date:'2026-11-10',note:'Opening'});
+  const args={action:'billSave',requestId:'supplier-bill-once-1',payload:{vendor:'Supplier AI',invoiceNo:'AI-001',amount:'250.25',date:'2026-11-10',scope:'business',note:'Actual supplier invoice'}};
+  const saved=await h.call('mytech_save',args),repeat=await h.call('mytech_save',args);assert.equal(saved.error,false);assert.equal(saved.result.result.total,25025);assert.equal(repeat.result.duplicate,true);assert.equal(repeat.result.result.id,saved.result.result.id);assert.ok(saved.result.webUrl.endsWith('?page=bills'));
+  const paid=await h.save('billPay',{id:saved.result.result.id,accountId:account.id,amount:'100.25',date:'2026-11-10'},{role:'staff'});assert.equal(paid.error,false);assert.equal(paid.result.result.billRemaining,15000);assert.equal(paid.result.result.billId,saved.result.result.id);
+  assert.equal((await h.save('billPay',{id:saved.result.result.id,accountId:account.id,amount:'150.01',date:'2026-11-10'})).error,true);
+  const personal=(await h.save('billSave',{vendor:'Private supplier',amount:'15',date:'2026-11-10',scope:'personal'})).result.result;
+  const staffList=(await h.call('mytech_list',{collection:'bills'},{role:'staff'})).result;assert.equal(staffList.total,1);assert.equal(staffList.records[0].id,saved.result.result.id);assert.equal((await h.call('mytech_list',{collection:'bills'})).result.total,2);
+  assert.equal((await h.save('billPay',{id:personal.id,accountId:account.id,amount:'1',date:'2026-11-10'},{role:'staff'})).error,true);assert.equal((await h.save('billCancel',{id:saved.result.result.id,note:'Cannot cancel paid bill'},{role:'staff'})).error,true);
+  const state=await h.state();assert.equal(state.bills.length,2);assert.equal(state.entries.filter(e=>e.billId===saved.result.result.id).length,1);await h.settle();
+});

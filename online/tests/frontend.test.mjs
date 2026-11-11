@@ -33,3 +33,37 @@ test('Trello forms expose targets and proofs while salary requires an explicit c
   assert.ok(!h.run("trelloFormFields('payrollSave')").includes('value="auto"'));assert.equal(h.run("fileMime({name:'export.csv',type:'application/vnd.ms-excel'})"),'text/csv');
   h.run("S.syncJobs=[{kind:'entry',recordId:'one',status:'done',createdAt:2},{kind:'entry',recordId:'one',status:'error',createdAt:1}]");assert.ok(h.run("trelloRecordStatus('entry','one')").includes('ส่งไม่สำเร็จ'));
 });
+
+test('bills navigation appears once after finance registers its page',()=>{
+  const h=ui();h.run('render()');
+  assert.equal((h.node('#app').innerHTML.match(/data-page="bills"/g)||[]).length,1);
+});
+
+test('project filters include unpaid obligations and course registrations with payroll drafts owner only',()=>{
+  const h=ui();
+  h.run("S.bills=[{project:'Unpaid bill'}];S.purchases=[{project:'Unpaid purchase'}];S.documents=[{project:'Document <project>'}];S.courses=[{id:'course',name:'Unpaid course'}];S.enrollments=[{courseId:'course'}];S.payroll=[{status:'draft',month:'2026-11'}]");
+  let html=h.run('filterToolbar()');
+  for(const label of ['Unpaid bill','Unpaid purchase','Document &lt;project&gt;','Unpaid course','เงินเดือน'])assert.ok(html.includes(label),label);
+  h.run("U={id:'staff',role:'staff',name:'Staff'}");html=h.run('filterToolbar()');
+  assert.ok(!html.includes('เงินเดือน'));
+});
+
+test('Invoice payment defaults to enrollment course project while standalone invoices retain their reference',async()=>{
+  const h=ui();
+  h.run("S.courses=[{id:'course',name:'ECU course'}];S.enrollments=[{id:'enrollment',courseId:'course'}];S.documents=[{id:'invoice',number:'INV-1',enrollmentId:'enrollment'},{id:'standalone',number:'INV-2'}];entryForm=(type,extra)=>({type,extra})");
+  const linked=await h.run("documentDispatch('invoicepay','invoice')");
+  assert.equal(linked.type,'income');assert.equal(linked.extra.project,'ECU course');assert.equal(linked.extra.enrollmentId,'enrollment');
+  const standalone=await h.run("documentDispatch('invoicepay','standalone')");
+  assert.equal(standalone.extra.project,'INV-2');
+});
+
+test('downloaded report CSV preserves negative monetary cells and protects formula text once',async()=>{
+  const h=ui();let blob;
+  h.ctx.URL={createObjectURL(value){blob=value;return 'blob:test';},revokeObjectURL(){}};
+  h.ctx.setTimeout=()=>{};h.ctx.document.createElement=()=>({click(){}});
+  h.run("page='report';S.accounts=[{id:'business',name:'Cash',scope:'business'}];S.entries=[{id:'expense',accountId:'business',type:'expense',amount:123,cash:-123,date:'2026-11-10',note:'=1+1'}]");
+  assert.equal(await h.run("financeDispatch('csv')"),true);
+  const csv=await blob.text();
+  assert.ok(csv.includes('"-1.23"'));assert.ok(!csv.includes('"\'-1.23"'));
+  assert.ok(csv.includes('"\'=1+1"'));assert.ok(!csv.includes('"\'\'=1+1"'));
+});

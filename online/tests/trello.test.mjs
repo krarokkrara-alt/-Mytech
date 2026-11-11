@@ -116,3 +116,16 @@ test('selected Trello document exports include the issued signature without modi
   const customer=(await h.action('customer',{name:'A'})).body.result;await h.action('document',{kind:'quote',customerId:customer.id,date:'2026-11-08',items:[{description:'A',quantity:'1',price:'100'}]},newTarget);await drain(h,remote);
   assert.ok(remote.files.some(f=>new TextDecoder().decode(f.bytes).includes('data:image/png;base64,'+png)));assert.ok(!JSON.stringify((await h.call('/api/state')).body.company).includes(png));
 });
+
+test('supplier bill exports its signed internal record and payments, while personal bills stay owner-only',async()=>{
+  const h=trelloHarness(),remote=remoteTrello(),png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=';
+  assert.equal((await h.post('/api/company/signature',{name:'Bill approver',title:'Director',image:{mime:'image/png',base64:png}})).status,200);
+  await h.post('/api/members',{name:'Staff',email:'staff@example.test'});
+  const created=await h.action('billSave',{vendor:'Supplier test',invoiceNo:'SUP-100',category:'Materials',amount:'1000',date:'2026-11-08',scope:'business',note:'Supplier bill details'},newTarget);assert.equal(created.status,200,JSON.stringify(created.body));const bill=created.body.result;
+  await drain(h,remote);assert.equal(remote.cards.length,1);const document=remote.files.find(f=>f.name.endsWith(bill.number+'.html'));assert.ok(document);const html=new TextDecoder().decode(document.bytes);assert.match(html,/บันทึกภายใน/);assert.match(html,/data:image\/png;base64,/);assert.match(html,/Bill approver/);assert.match(html,/<style>/);assert.doesNotMatch(html,/src="\/document.js"/);
+  const paid=await h.action('billPay',{id:bill.id,accountId:h.accountId,amount:'250',date:'2026-11-08'},newTarget);assert.equal(paid.status,200,JSON.stringify(paid.body));assert.equal(paid.body.result.billId,bill.id);await drain(h,remote);assert.ok(remote.comments.some(c=>c.data.text.includes('บิลค่าใช้จ่าย: '+bill.number)));assert.equal((await h.call('/api/state')).body.summary.expense,25000);
+  const personal=(await h.action('billSave',{vendor:'Personal supplier',amount:'10',date:'2026-11-08',scope:'personal'},newTarget)).body.result;
+  assert.equal((await h.post('/api/trello/send',{kind:'bill',recordId:personal.id,trello:newTarget,requestId:'private-bill-send'},'staff')).status,403);
+  assert.equal((await h.call('/api/bill?id='+personal.id,{role:'staff'})).status,403);
+  const staffState=(await h.call('/api/state',{role:'staff'})).body;assert.ok(!staffState.bills.some(b=>b.id===personal.id));assert.ok(!staffState.syncJobs.some(j=>j.recordId===personal.id));
+});
