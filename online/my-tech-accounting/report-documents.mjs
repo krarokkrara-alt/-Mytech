@@ -3,7 +3,7 @@ import {signatureHtml} from '../worker/signature.mjs';
 
 const reportEscape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const reportBaht=value=>new Intl.NumberFormat('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2}).format((value||0)/100);
-const reportTypeNames={opening:'ยอดยกมา',income:'รับเงิน',expense:'จ่ายค่าใช้จ่าย',settlement:'เคลียร์เงินเบิก',advance:'เงินเบิก',advance_return:'คืนเงินเบิก',owner_in:'เจ้าของเติมเงิน',owner_out:'เจ้าของถอนเงิน',debt_repay:'คืนต้นหนี้',interest:'ดอกเบี้ยจ่าย'};
+const reportTypeNames={opening:'ยอดยกมา',opening_adjustment:'ปรับยอดยกมา',income:'รับเงิน',expense:'จ่ายค่าใช้จ่าย',settlement:'เคลียร์เงินเบิก',advance:'เงินเบิก',advance_return:'คืนเงินเบิก',owner_in:'เจ้าของเติมเงิน',owner_out:'เจ้าของถอนเงิน',debt_repay:'คืนต้นหนี้',interest:'ดอกเบี้ยจ่าย'};
 const reportCell=value=>`<td>${reportEscape(value)}</td>`;
 const reportAmount=value=>`<td class="num">${reportBaht(value)}</td>`;
 const reportTable=(heads,rows)=>`<div class="table-wrap"><table><thead><tr>${heads.map(h=>`<th>${reportEscape(h)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>'<tr>'+row+'</tr>').join(''):`<tr><td colspan="${heads.length}">ไม่มีรายการตามตัวกรอง</td></tr>`}</tbody></table></div>`;

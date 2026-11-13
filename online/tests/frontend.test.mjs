@@ -11,6 +11,13 @@ function ui(){const nodes=new Map(),node=selector=>{if(!nodes.has(selector))node
   const s={...initial(),employees:[],payroll:[],members:[],attachmentList:[],trelloConfigured:false};s.summary=summary(s);ctx.fixture=s;vm.runInContext("S=fixture; U={id:'owner',name:'Owner',role:'owner'}",ctx);return {ctx,node,run:code=>vm.runInContext(code,ctx)};
 }
 
+test('account settings expose opening correction, history and negative option while ledger prevents deleting adjustments',async()=>{
+  const h=ui();h.run("S.accounts=[{id:'a',name:'Cash',scope:'business',openingSet:true,allowNegative:true,openingRevision:2}];S.summary.accounts=[{...S.accounts[0],balance:-5000}];S.entries=[{id:'opening',accountId:'a',type:'opening',amount:10000,cash:10000,date:'2026-11-13',note:'Initial'},{id:'correction',accountId:'a',type:'opening_adjustment',amount:15000,cash:-15000,openingBefore:10000,openingAfter:-5000,allowNegativeAfter:true,date:'2026-11-13',note:'Correction reason'}]");
+  const html=h.run('settingsView()');assert.ok(html.includes('data-act="openingedit:a"'));assert.ok(html.includes('ประวัติยอดยกมา'));assert.ok(html.includes('อนุญาตยอดติดลบ'));assert.ok(html.includes('-50.00'));assert.ok(html.includes('Correction reason'));
+  const ledger=h.run('entryTable(S.entries)');assert.ok(ledger.includes('ปรับยอดยกมา'));assert.ok(!ledger.includes('data-act="reverse:correction"'));
+  h.run('openingForm=(id,edit)=>{globalThis.openingTest={id,edit}}');await h.run("dispatch('openingedit:a')");assert.equal(h.run('openingTest.id'),'a');assert.equal(h.run('openingTest.edit'),true);
+});
+
 test('wage payment chooser shows pending slips and opens the adjustment payment flow; browser arithmetic matches stored satang',async()=>{
   const h=ui();h.run("S.payroll=[{id:'pending',employee:{name:'Pending worker'},month:'2026-11',net:125063,status:'draft'},{id:'paid',employee:{name:'Paid worker'},month:'2026-10',net:10000,status:'paid',paymentEntryId:'paid-entry'},{id:'cancelled',employee:{name:'Cancelled worker'},month:'2026-09',net:10000,status:'cancelled'}];S.entries=[{id:'paid-entry',payrollId:'paid',type:'expense',amount:10000,cash:-10000}]");
   const html=h.run('wagePayrollPicker()');assert.ok(html.includes('Pending worker'));assert.ok(html.includes('1,250.63'));assert.ok(!html.includes('Paid worker'));assert.ok(!html.includes('Cancelled worker'));assert.ok(html.includes('ปรับแก้และจ่ายค่าแรง'));

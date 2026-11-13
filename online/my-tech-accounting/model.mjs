@@ -22,6 +22,22 @@ export function historical(){return [
 ['ลูกค้ารอเช็ก','หมายเลข 1 ยังไม่พบการยืนยันจ่าย หมายเลข 2–3 คนหนึ่งมาแต่ยังไม่จ่าย อีกคนไม่มา ต้องเช็กว่าใคร',null]
 ].map(([title,note,amount])=>({id:uid(),title,note,amount,status:'pending',source:'ประวัติแชตผู้ใช้',createdAt:new Date().toISOString()}));}
 export const active=s=>s.entries.filter(e=>!e.reverses&&!s.entries.some(r=>r.reverses===e.id));
+export const openingAmount=(s,id)=>active(s).filter(e=>e.accountId===id&&['opening','opening_adjustment'].includes(e.type)).reduce((n,e)=>n+e.cash,0);
+const openingMoney=value=>{const text=String(value??'').trim();return text.startsWith('-')?-money(text.slice(1)):money(text);};
+export function validateOpeningAdjustments(s){
+  for(const account of s.accounts){
+    assert(account.allowNegative===undefined||typeof account.allowNegative==='boolean','ตัวเลือกยอดติดลบไม่ถูกต้อง');
+    const corrections=s.entries.filter(e=>e.accountId===account.id&&e.type==='opening_adjustment');if(!corrections.length)continue;
+    const originals=s.entries.filter(e=>e.accountId===account.id&&e.type==='opening');assert(originals.length===1&&account.openingSet,'ไม่พบยอดยกมาเดิมของรายการปรับ');
+    const original=originals[0];let value=original.cash,revision=1,allow=original.allowNegativeAfter??corrections[0].allowNegativeBefore;
+    assert(Number.isSafeInteger(value)&&Math.abs(value)<=1e12&&original.amount===Math.abs(value),'ยอดยกมาเดิมไม่ถูกต้อง');
+    for(const e of corrections){
+      revision++;assert(e.openingId===original.id&&e.openingBefore===value&&Number.isSafeInteger(e.openingAfter)&&Math.abs(e.openingAfter)<=1e12&&e.cash===e.openingAfter-value&&e.amount===Math.abs(e.cash)&&e.openingRevision===revision&&!e.reverses&&!s.entries.some(r=>r.reverses===e.id),'ประวัติปรับยอดยกมาไม่ตรงกัน');
+      assert(typeof e.allowNegativeBefore==='boolean'&&e.allowNegativeBefore===allow&&typeof e.allowNegativeAfter==='boolean'&&(e.openingAfter>=0||e.allowNegativeAfter||e.openingAfter===value),'ตัวเลือกยอดติดลบในประวัติไม่ถูกต้อง');value=e.openingAfter;allow=e.allowNegativeAfter;
+    }
+    assert(account.openingRevision===revision&&account.allowNegative===allow,'ข้อมูลบัญชีไม่ตรงกับประวัติปรับยอดยกมา');
+  }
+}
 export function paid(s,id){return active(s).filter(e=>e.type==='income'&&e.enrollmentId===id).reduce((a,e)=>a+e.amount,0);}
 export function invoicePaid(s,doc){return active(s).filter(e=>e.type==='income'&&(doc.enrollmentId?e.enrollmentId===doc.enrollmentId:e.invoiceId===doc.id)).reduce((a,e)=>a+e.amount,0);}
 export function outstandingAdvance(s,id){const e=find(s.entries,id);return e.amount-active(s).filter(x=>['settlement','advance_return'].includes(x.type)&&x.advanceId===id).reduce((a,x)=>a+x.amount,0);}
@@ -60,9 +76,20 @@ case 'course':result={...meta,name:txt(p.name,120),price:pos(p.price),cohort:txt
 case 'enroll':{find(s.customers,p.customerId);const c=find(s.courses,p.courseId);assert(!s.enrollments.some(x=>x.customerId===p.customerId&&x.courseId===p.courseId),'ลูกค้าลงทะเบียนคอร์สนี้แล้ว');result={...meta,customerId:p.customerId,courseId:c.id,price:p.price?pos(p.price):c.price};s.enrollments.push(result);break;}
 case 'attendance':{find(s.enrollments,p.enrollmentId);find(s.courses,p.courseId);assert(!s.attendance.some(a=>a.enrollmentId===p.enrollmentId&&a.courseId===p.courseId),'บันทึกเข้าร่วมแล้ว');s.attendance.push({...meta,enrollmentId:p.enrollmentId,courseId:p.courseId,date:date()});break;}
 case 'account':owner();result={...meta,name:txt(p.name,80),scope:p.scope==='personal'?'personal':'business',openingSet:false};assert(!s.accounts.some(a=>a.name===result.name),'ชื่อบัญชีซ้ำ');s.accounts.push(result);break;
-case 'entry':{const ac=find(s.accounts,p.accountId);if(ac.scope==='personal')owner();const types=['opening','income','expense','advance','advance_return','settlement','owner_in','owner_out','debt_repay','interest'];assert(types.includes(p.type),'ประเภทรายการไม่ถูกต้อง');const e={...meta,date:date(),type:p.type,accountId:ac.id,amount:p.type==='opening'?money(p.amount):pos(p.amount),note:txt(p.note),project:String(p.project||'').slice(0,120),cash:0};
-if(e.type==='opening'){owner();assert(!ac.openingSet,'ตั้งยอดยกมาแล้ว');ac.openingSet=true;}
-if(['opening','income','owner_in','advance_return'].includes(e.type))e.cash=e.amount;
+case 'entry':{const ac=find(s.accounts,p.accountId);if(ac.scope==='personal')owner();const types=['opening','income','expense','advance','advance_return','settlement','owner_in','owner_out','debt_repay','interest'];assert(types.includes(p.type),'ประเภทรายการไม่ถูกต้อง');const e={...meta,date:date(),type:p.type,accountId:ac.id,amount:p.type==='opening'?openingMoney(p.amount):pos(p.amount),note:txt(p.note),project:String(p.project||'').slice(0,120),cash:0};
+assert(p.correctOpening===undefined||typeof p.correctOpening==='boolean','ตัวเลือกแก้ยอดยกมาไม่ถูกต้อง');assert(p.allowNegative===undefined||typeof p.allowNegative==='boolean','ตัวเลือกยอดติดลบไม่ถูกต้อง');assert((!p.correctOpening&&p.allowNegative===undefined)||e.type==='opening','แก้ตัวเลือกบัญชีผ่านเมนูยอดยกมาเท่านั้น');
+if(e.type==='opening'){
+  owner();const target=e.amount,previousAllow=ac.allowNegative===true,allow=p.allowNegative??previousAllow;
+  assert(target>=0||allow||p.correctOpening&&target===openingAmount(s,ac.id),'ต้องเปิดอนุญาตยอดติดลบก่อนตั้งยอดยกมาติดลบ');
+  if(p.correctOpening){
+    assert(ac.openingSet,'ตั้งยอดยกมาก่อนแก้ไข');assert(Number.isSafeInteger(p.expectedOpeningRevision)&&p.expectedOpeningRevision===(ac.openingRevision||1),'ยอดยกมาถูกแก้ไขแล้ว กรุณาโหลดใหม่');
+    const originals=active(s).filter(x=>x.accountId===ac.id&&x.type==='opening');assert(originals.length===1,'ไม่พบยอดยกมาเดิมของบัญชี');assert(e.date>=originals[0].date,'วันที่ปรับต้องไม่ก่อนวันเริ่มต้นบัญชี');const before=openingAmount(s,ac.id),delta=target-before;
+    assert(delta!==0||allow!==previousAllow,'ยอดและตัวเลือกใหม่เหมือนเดิม');
+    e.type='opening_adjustment';e.amount=Math.abs(delta);e.cash=delta;e.openingId=originals[0].id;e.openingBefore=before;e.openingAfter=target;e.allowNegativeBefore=previousAllow;e.allowNegativeAfter=allow;e.openingRevision=(ac.openingRevision||1)+1;ac.openingRevision=e.openingRevision;
+  }else{assert(!ac.openingSet,'ตั้งยอดยกมาแล้ว ให้ใช้ปุ่มแก้ไขยอดยกมา');ac.openingSet=true;ac.openingRevision=1;e.cash=target;e.amount=Math.abs(target);e.allowNegativeAfter=allow;}
+  ac.allowNegative=allow;const balance=active(s).filter(x=>x.accountId===ac.id).reduce((n,x)=>n+x.cash,0)+e.cash;assert(allow||balance>=0,'ปรับแล้วเงินคงเหลือติดลบ หากต้องการให้ติดลบให้เปิดตัวเลือกของบัญชี');
+}
+if(['income','owner_in','advance_return'].includes(e.type))e.cash=e.amount;
 if(['expense','advance','owner_out','debt_repay','interest'].includes(e.type))e.cash=-e.amount;
 if(p.invoiceId){const inv=find(s.documents,p.invoiceId);assert(inv.kind==='invoice'&&inv.status==='issued'&&e.type==='income'&&ac.scope==='business','Invoice ไม่ถูกต้อง');assert(invoicePaid(s,inv)+e.amount<=inv.total,'รับเงินเกินยอดค้าง Invoice');e.invoiceId=inv.id;if(inv.enrollmentId){assert(!p.enrollmentId||p.enrollmentId===inv.enrollmentId,'การลงทะเบียนไม่ตรงกับ Invoice');p={...p,enrollmentId:inv.enrollmentId};}}
 if(p.enrollmentId){const en=find(s.enrollments,p.enrollmentId);assert(e.type==='income'&&ac.scope==='business','รับค่าเรียนผ่านบัญชีกิจการเท่านั้น');assert(paid(s,en.id)+e.amount<=en.price,'ยอดรับเกินค่าคอร์สคงเหลือ');e.enrollmentId=en.id;}
@@ -71,9 +98,9 @@ const linkedBill=p.billId?find(s.bills||[],p.billId):p.purchaseId?(s.bills||[]).
 if(linkedBill){assert(linkedBill.status==='issued','บิลนี้ยกเลิกแล้ว');assert(['expense','settlement'].includes(e.type),'ต้องเป็นรายจ่ายหรือเคลียร์เบิก');assert(ac.scope===linkedBill.scope,'บัญชีจ่ายต้องตรงกับขอบเขตบิล');assert(!p.purchaseId||p.purchaseId===linkedBill.purchaseId,'ใบสั่งซื้อไม่ตรงกับบิล');const spent=active(s).filter(x=>['expense','settlement'].includes(x.type)&&(x.billId===linkedBill.id||linkedBill.purchaseId&&x.purchaseId===linkedBill.purchaseId)).reduce((a,x)=>a+x.amount,0);assert(spent+e.amount<=linkedBill.total,'ยอดจ่ายเกินบิลคงเหลือ');e.billId=linkedBill.id;if(linkedBill.purchaseId)e.purchaseId=linkedBill.purchaseId;}
 if(p.purchaseId||e.purchaseId){const po=find(s.purchases,p.purchaseId||e.purchaseId);assert(ac.scope==='business','ใบสั่งซื้อกิจการต้องชำระด้วยบัญชีกิจการ');assert(['expense','settlement'].includes(e.type),'ต้องเป็นรายจ่ายหรือเคลียร์เบิก');const spent=active(s).filter(x=>x.purchaseId===po.id&&['expense','settlement'].includes(x.type)).reduce((a,x)=>a+x.amount,0);assert(spent+e.amount<=po.total,'ยอดจ่ายเกินใบสั่งซื้อ');e.purchaseId=po.id;}
 if(e.type==='debt_repay'){const d=find(s.debts,p.debtId);assert(ac.scope===d.scope,'บัญชีต้องตรงกับเจ้าของหนี้');const repaid=active(s).filter(x=>x.debtId===d.id&&x.type==='debt_repay').reduce((a,x)=>a+x.amount,0);assert(repaid+e.amount<=d.amount,'เกินหนี้คงเหลือ');e.debtId=d.id;}
-if(e.cash<0&&e.type!=='settlement'){assert(ac.openingSet,'ตั้งยอดยกมาของบัญชีก่อนบันทึกเงินจ่าย');const bal=active(s).filter(x=>x.accountId===ac.id).reduce((a,x)=>a+x.cash,0);assert(bal+e.cash>=0,'ยอดเงินในบัญชีไม่พอ ตรวจยอดยกมาหรือแหล่งเงิน');}
+if(e.cash<0&&e.type!=='settlement'){assert(ac.openingSet,'ตั้งยอดยกมาของบัญชีก่อนบันทึกเงินจ่าย');const bal=active(s).filter(x=>x.accountId===ac.id).reduce((a,x)=>a+x.cash,0);assert(ac.allowNegative===true||bal+e.cash>=0,'ยอดเงินในบัญชีไม่พอ ตรวจยอดยกมาหรือแหล่งเงิน');}
 s.entries.push(e);result=e;break;}
-case 'reverse':{owner();const e=find(s.entries,p.id);assert(active(s).some(x=>x.id===e.id),'รายการถูกกลับแล้ว');assert(e.type!=='opening','ยอดยกมายกเลิกไม่ได้ ให้ปรับด้วยรายการที่อธิบายได้');assert(!active(s).some(x=>x.advanceId===e.id),'มีรายการเคลียร์เงินเบิกแล้ว ต้องกลับรายการลูกก่อน');const bal=active(s).filter(x=>x.accountId===e.accountId).reduce((a,x)=>a+x.cash,0);assert(bal-e.cash>=0,'กลับรายการแล้วเงินคงเหลือติดลบ');result={...meta,reverses:e.id,accountId:e.accountId,amount:e.amount,cash:-e.cash,type:'reversal',date:date(),note:txt(p.note),project:e.project};s.entries.push(result);break;}
+case 'reverse':{owner();const e=find(s.entries,p.id);assert(active(s).some(x=>x.id===e.id),'รายการถูกกลับแล้ว');assert(!['opening','opening_adjustment'].includes(e.type),'ใช้ปุ่มแก้ไขยอดยกมาเพื่อปรับยอดและเก็บประวัติ');assert(!active(s).some(x=>x.advanceId===e.id),'มีรายการเคลียร์เงินเบิกแล้ว ต้องกลับรายการลูกก่อน');const bal=active(s).filter(x=>x.accountId===e.accountId).reduce((a,x)=>a+x.cash,0);assert(find(s.accounts,e.accountId).allowNegative===true||bal-e.cash>=0,'กลับรายการแล้วเงินคงเหลือติดลบ');result={...meta,reverses:e.id,accountId:e.accountId,amount:e.amount,cash:-e.cash,type:'reversal',date:date(),note:txt(p.note),project:e.project};s.entries.push(result);break;}
 case 'debt':owner();result={...meta,name:txt(p.name,120),amount:pos(p.amount),scope:p.scope==='business'?'business':'personal',estimated:!!p.estimated,due:p.due||null,note:txt(p.note)};s.debts.push(result);break;
 case 'product':{const sku=txt(p.sku,50);assert(!s.products.some(x=>x.sku===sku),'รหัสสินค้าซ้ำ');assert(['material','tool','finished'].includes(p.kind),'ประเภทสินค้าไม่ถูกต้อง');result={...meta,sku,name:txt(p.name,120),unit:txt(p.unit,30),kind:p.kind,min:decimal(p.min||'0',3)};s.products.push(result);break;}
 case 'purchase':{const product=find(s.products,p.productId);result={...meta,productId:product.id,vendor:txt(p.vendor,120),quantity:qty(p.quantity),received:0,total:pos(p.amount),date:date(),note:txt(p.note)};s.purchases.push(result);break;}

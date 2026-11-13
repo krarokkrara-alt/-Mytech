@@ -1,4 +1,4 @@
-import {initial,mutate,summary,active,uid,assert} from '../my-tech-accounting/model.mjs';
+import {initial,mutate,summary,active,uid,assert,validateOpeningAdjustments} from '../my-tech-accounting/model.mjs';
 import {documentHtml} from '../my-tech-accounting/documents.mjs';
 import {payrollInitial,payrollMutate,payslipHtml,validatePayroll} from './payroll.mjs';
 import {assets,seedState} from './generated.mjs';
@@ -159,7 +159,7 @@ function validateRestore(backup){
   assert(s.entries.every(e=>s.accounts.some(a=>a.id===e.accountId)&&Number.isSafeInteger(e.amount)&&Number.isSafeInteger(e.cash)),'รายการเงินไม่ถูกต้อง');
   assert(s.lots.every(l=>s.products.some(p=>p.id===l.productId)&&Number.isSafeInteger(l.quantity)&&l.quantity>=0&&Number.isSafeInteger(l.value)&&l.value>=0),'ข้อมูลสต๊อกไม่ถูกต้อง');
   summary(s);
-  validatePayroll(payrollInitial(s));validateBills(s);
+  validateOpeningAdjustments(s);validatePayroll(payrollInitial(s));validateBills(s);
   assert(Array.isArray(backup.attachments||[])&&(backup.attachments||[]).length<=500,'ไฟล์แนบเกินจำนวนที่รองรับ');
   const receiptEntries=new Set(),receiptNumbers=new Set();assert(Array.isArray(s.receipts||[]),'ข้อมูลใบเสร็จไม่ถูกต้อง');for(const r of s.receipts||[]){const entry=s.entries.find(e=>e.id===r.entryId&&e.type==='income'&&e.amount===r.amount);assert(entry&&r.date===entry.date&&typeof r.number==='string'&&r.number&&typeof r.note==='string'&&r.customer&&typeof r.customer.name==='string'&&!receiptEntries.has(r.entryId)&&!receiptNumbers.has(r.number),'ข้อมูลใบเสร็จไม่ถูกต้อง');receiptEntries.add(r.entryId);receiptNumbers.add(r.number);}validateSignatureBackup(backup);return billsInitial(receiptsInitial(payrollInitial(s)));
 }

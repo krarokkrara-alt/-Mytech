@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import worker from '../worker/index.mjs';
 import {database,bucket} from './db.mjs';
 
+test('MCP owner corrects opening with signed amounts and per-account negative balance option without creating income',async()=>{
+  const h=aiHarness(),a=(await h.save('account',{name:'Opening account',scope:'business'})).result.result;
+  await h.save('entry',{type:'opening',accountId:a.id,amount:'1000',date:'2026-11-13',note:'Opening'});
+  const schema=(await h.call('mytech_action_schema',{action:'entry'})).result.payloadSchema;assert.ok(schema.properties.correctOpening);assert.ok(schema.properties.allowNegative);
+  const adjusted=await h.save('entry',{type:'opening',accountId:a.id,amount:'-50',date:'2026-11-13',note:'Correct opening',correctOpening:true,expectedOpeningRevision:1,allowNegative:true});
+  assert.equal(adjusted.error,false);assert.equal(adjusted.result.result.type,'opening_adjustment');assert.equal(adjusted.result.result.openingAfter,-5000);
+  const invalid=await h.save('entry',{type:'income',accountId:a.id,amount:'-1',date:'2026-11-13',note:'Invalid income'});assert.equal(invalid.error,true);
+  const state=await h.state();assert.equal(state.entries.length,2);assert.equal(state.receipts.length,0);assert.equal(state.accounts[0].allowNegative,true);
+});
+
 test('MCP supports daily/hourly wages and atomic adjustment on payroll payment',async()=>{
   const h=aiHarness(),a=(await h.save('account',{name:'Wage account',scope:'business'})).result.result;
   await h.save('entry',{type:'opening',accountId:a.id,date:'2026-11-13',amount:'10000',note:'Opening'});

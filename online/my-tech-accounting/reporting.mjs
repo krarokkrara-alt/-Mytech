@@ -64,7 +64,8 @@ function reportScope(entries, scope) {
     ['interest', 'เงินออกจ่ายดอกเบี้ย', row => row.type === 'interest'],
     ['advance', 'เงินเบิกไปซื้อของ', row => row.type === 'advance'],
     ['debt_repay', 'เงินคืนต้นหนี้', row => row.type === 'debt_repay'],
-    ['owner_out', 'เจ้าของถอนเงิน', row => row.type === 'owner_out']
+    ['owner_out', 'เจ้าของถอนเงิน', row => row.type === 'owner_out'],
+    ['opening', 'ยอดยกมา / การปรับลดยอดยกมา', row => ['opening','opening_adjustment'].includes(row.type)]
   ];
   const cashRows = rows.filter(row => row.cash < 0);
   const outflows = outflowRules.map(([key, label, accepts]) => ({key, label, amount: reportSum(cashRows.filter(accepts), row => -row.cash), count: cashRows.filter(accepts).length}));
