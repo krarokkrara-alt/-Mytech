@@ -11,6 +11,21 @@ function ui(){const nodes=new Map(),node=selector=>{if(!nodes.has(selector))node
   const s={...initial(),employees:[],payroll:[],members:[],attachmentList:[],trelloConfigured:false};s.summary=summary(s);ctx.fixture=s;vm.runInContext("S=fixture; U={id:'owner',name:'Owner',role:'owner'}",ctx);return {ctx,node,run:code=>vm.runInContext(code,ctx)};
 }
 
+test('wage payment chooser shows pending slips and opens the adjustment payment flow; browser arithmetic matches stored satang',async()=>{
+  const h=ui();h.run("S.payroll=[{id:'pending',employee:{name:'Pending worker'},month:'2026-11',net:125063,status:'draft'},{id:'paid',employee:{name:'Paid worker'},month:'2026-10',net:10000,status:'paid',paymentEntryId:'paid-entry'},{id:'cancelled',employee:{name:'Cancelled worker'},month:'2026-09',net:10000,status:'cancelled'}];S.entries=[{id:'paid-entry',payrollId:'paid',type:'expense',amount:10000,cash:-10000}]");
+  const html=h.run('wagePayrollPicker()');assert.ok(html.includes('Pending worker'));assert.ok(html.includes('1,250.63'));assert.ok(!html.includes('Paid worker'));assert.ok(!html.includes('Cancelled worker'));assert.ok(html.includes('ปรับแก้และจ่ายค่าแรง'));
+  assert.equal(h.run("wageCalculation({unit:'day',quantity:'2.5',rate:'500.25'}).amount"),125063);
+  assert.equal(h.run("wageMoneyInput('0.00')"),0);assert.equal(h.run("wageMoneyInput('1.01')"),101);assert.throws(()=>h.run("wageMoneyInput('-1')"));
+  h.run('salaryForm=(id,mode)=>{globalThis.wageOpen={id,mode}}');await h.run("onlineDispatch('payrollpay:pending')");assert.equal(h.run('wageOpen.mode'),'pay');assert.equal(h.run('wageOpen.id'),'pending');
+  h.node('#wage-payroll').value='pending';await h.run("onlineDispatch('wagepay')");assert.equal(h.run('wageOpen.mode'),'pay');
+});
+
+test('payroll CSV separates calculated wages from other earnings without double counting',async()=>{
+  const h=ui();let blob;h.ctx.URL={createObjectURL(value){blob=value;return 'blob:test';},revokeObjectURL(){}};h.ctx.setTimeout=()=>{};h.ctx.document.createElement=()=>({click(){}});
+  h.run("S.payroll=[{month:'2026-11',employee:{code:'W1',name:'Worker'},baseSalary:10000,wage:{unit:'hour',quantity:7500,rate:5000,amount:37500},gross:48500,totalDeductions:500,net:48000,status:'draft'}]");await h.run("onlineDispatch('payrollcsv')");const csv=await blob.text();
+  assert.ok(csv.includes('ค่าแรงตามจำนวน'));assert.ok(csv.includes('"100.00","375.00","ชั่วโมง","7.5","50.00","10.00","5.00","480.00"'));
+});
+
 test('Invoice edit controls are visible to writers, prefill the existing document and submit its original ID/revision',async()=>{
   const h=ui();h.run("S.customers=[{id:'customer',name:'Registry name'}];S.documents=[{id:'invoice',number:'INV-2026-0001',kind:'invoice',status:'issued',date:'2026-10-30',due:'2026-11-20',customerId:'customer',customer:{name:'Snapshot name',address:'Old address'},items:[{description:'ECU service',quantity:1500,unitPrice:12345,total:18518}],subtotal:18518,discount:0,total:18518,note:'Original conditions',revision:2}];openModal=(title,content,callback,label)=>{globalThis.editCapture={title,content,callback,label}};setupTrelloForm=(action,id)=>{globalThis.editRoute={action,id}};act=async(action,payload)=>({action,payload});");
   assert.ok(h.run('documentsView()').includes('data-act="editdoc:invoice"'));

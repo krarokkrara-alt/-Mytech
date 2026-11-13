@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import worker from '../worker/index.mjs';
 import {database,bucket} from './db.mjs';
 
+test('MCP supports daily/hourly wages and atomic adjustment on payroll payment',async()=>{
+  const h=aiHarness(),a=(await h.save('account',{name:'Wage account',scope:'business'})).result.result;
+  await h.save('entry',{type:'opening',accountId:a.id,date:'2026-11-13',amount:'10000',note:'Opening'});
+  const e=(await h.save('employee',{code:'W1',name:'Wage employee',baseSalary:'0'})).result.result;
+  const p=(await h.save('payrollSave',{employeeId:e.id,month:'2026-11',baseSalary:'0',wage:{enabled:true,unit:'day',quantity:'2',rate:'300'},earnings:[],deductions:[]})).result.result;assert.equal(p.net,60000);
+  const schema=(await h.call('mytech_action_schema',{action:'payrollPay'})).result.payloadSchema;assert.ok(schema.properties.adjustment.properties.wage);assert.ok(schema.properties.expectedRevision);
+  const paid=await h.save('payrollPay',{id:p.id,expectedRevision:1,accountId:a.id,date:'2026-11-13',adjustment:{baseSalary:'0',wage:{unit:'hour',quantity:'7.5',rate:'50'},earnings:[],deductions:[],editReason:'Correct actual work units'}});
+  assert.equal(paid.error,false);assert.equal(paid.result.result.net,37500);assert.equal((await h.state()).entries.filter(x=>x.payrollId===p.id).length,1);
+});
+
 test('MCP edits an existing Invoice with revision and reason without duplicating its ID or revenue',async()=>{
   const h=aiHarness(),schema=(await h.call('mytech_action_schema',{action:'document'})).result.payloadSchema;
   for(const key of ['id','expectedRevision','editReason','customerName','clearDue'])assert.ok(schema.properties[key]);
